@@ -27,6 +27,7 @@
 	  state
 	 }).
 
+-type socket() :: port().
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -34,12 +35,17 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
-%%
-%% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
+
+-spec start_link(Socket::socket(), Module::atom(), Args::[term()]) ->
+			{ok, pid()} | ignore | {error, Error::term()}.
+
 start_link(Socket,Module,Args) ->
     gen_server:start_link(?MODULE, [Socket,Module,Args], []).
+
+-spec start(Socket::socket(), Module::atom(), Args::[term()]) ->
+		   {ok, pid()} | ignore | {error, Error::term()}.
 
 start(Socket, Module, Args) ->
     gen_server:start(?MODULE, [Socket,Module,Args], []).

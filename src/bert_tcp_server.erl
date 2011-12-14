@@ -52,10 +52,9 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
-%%
-%% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
+
 start_link(Port, Options, Module, Args) ->
     gen_server:start_link(?MODULE, [Port,Options,Module,Args], []).
 

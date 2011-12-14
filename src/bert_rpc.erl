@@ -14,7 +14,7 @@
 -export([cast_host/3, cast_host/4, cast_host/5]).
 -export([callback_host/5, callback_host/6, callback_host/7]).
 -export([call/4, cast/4, info/3]).
--export([open/2, close/1, read/1]).
+-export([open/0, open/1, open/2, close/1, read/1]).
 
 -type call_result() :: 
 	{reply,Result::term(),CacheInfo::cache_info()} |
@@ -51,7 +51,7 @@ call_host(Host, Mod, Fun, Args) ->
 		       call_result().    
 call_host(Host, Port, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun), 
 					   is_list(Args) ->
-    Socket = open(Host, Port),
+    {ok,Socket} = open(Host, Port),
     case call(Socket, Mod, Fun, Args) of
 	Stream = {stream,_Socket,_CacheInfo} ->
 	    Stream;
@@ -81,7 +81,7 @@ cast_host(Host, Mod, Fun, Args) ->
 
 cast_host(Host, Port, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun), 
 					   is_list(Args) ->
-    Socket = open(Host, Port),
+    {ok,Socket} = open(Host, Port),
     Result = cast(Socket, Mod, Fun, Args),
     close(Socket),
     Result.
@@ -116,7 +116,7 @@ callback_host(Host, Port, Mod, Fun, Args, Service, MFA={M,F,A}) when
       is_atom(Mod), is_atom(Fun), is_list(Args),
       is_binary(Service),
       is_atom(M), is_atom(F), is_list(A) ->
-    Socket = open(Host, Port),
+    {ok,Socket} = open(Host, Port),
     Result = callback(Socket, Mod, Fun, Args, Service, MFA),
     close(Socket),
     Result.
@@ -204,10 +204,14 @@ read(Socket) ->
 %%%    Open a transport connection
 %%% @end
 
+open() ->
+    open("localhost", ?BERT_PORT).
+
+open(Host) ->
+    open(Host, ?BERT_PORT).
+
 open(IP, Port) ->
-    {ok,Socket} = gen_tcp:connect(IP, Port,
-				  [binary, {packet,4}, {active,once}]),
-    Socket.
+    gen_tcp:connect(IP, Port, [binary, {packet,4}, {active,once}]).
 
 %%% @doc
 %%%    Close a transport connection
