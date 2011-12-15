@@ -14,7 +14,7 @@
 -export([cast_host/3, cast_host/4, cast_host/5]).
 -export([callback_host/5, callback_host/6, callback_host/7]).
 -export([call/4, cast/4, info/3]).
--export([open/0, open/1, open/2, close/1, read/1]).
+-export([open/0, open/1, open/2, close/1, read_chunk/1]).
 
 -type call_result() :: 
 	{reply,Result::term(),CacheInfo::cache_info()} |
@@ -187,8 +187,8 @@ handle_result(Socket, Stream, CacheInfo) ->
 %%%    Read a streamed block of data
 %%% @end
 
-read(Socket) ->
-    inet:setopts(Socket, {actice, once}),
+read_chunk(Socket) ->
+    inet:setopts(Socket, {active, once}),
     receive
 	{tcp, Socket, <<>>} ->
 	    end_of_stream;

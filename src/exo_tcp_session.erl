@@ -2,11 +2,11 @@
 %%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2011, Tony Rogvall
 %%% @doc
-%%%   BERT TCP session
+%%%   EXO TCP session
 %%% @end
 %%% Created : 22 Aug 2011 by Tony Rogvall <tony@rogvall.se>
 %%%-------------------------------------------------------------------
--module(bert_tcp_session).
+-module(exo_tcp_session).
 
 -behaviour(gen_server).
 

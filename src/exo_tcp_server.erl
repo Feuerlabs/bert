@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 22 Aug 2011 by Tony Rogvall <tony@rogvall.se>
 %%%-------------------------------------------------------------------
--module(bert_tcp_server).
+-module(exo_tcp_server).
 
 -behaviour(gen_server).
 
@@ -36,6 +36,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
+-export([behaviour_info/1]).
+
 -define(SERVER, ?MODULE). 
 
 -record(state, {
@@ -48,6 +50,21 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%% The plugin behaviour
+behaviour_info(callbacks) ->
+    [
+     {init,  2},  %% init(Socket::socket(), Args::[term()] 
+                  %%   -> {ok,state()} | {stop,reason(),state()}
+     {data,  3},  %% data(Socket::socket(), Data::io_list(), State::state()) 
+                  %%   -> {ok,state()}|{close,state()}|{stop,reason(),state()}
+     {close, 2},  %% close(Socket::socket(), State::state())
+                  %%   -> {ok,state()}
+     {error, 3}   %% error(Socket::socket(),Error::error(), State:state())
+                  %%   -> {ok,state8)} | {stop,reason(),state()}
+    ];
+behaviour_info(_Other) ->
+    undefined.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -153,7 +170,7 @@ handle_info({inet_async, L, Ref, {ok,Socket}}, State) when
 		    %% excute some "internal" calls to make it look like
 		    %% normal sockets
 		    inet_db:register_socket(Socket, inet_tcp),
-		    case bert_tcp_session:start(Socket,
+		    case exo_tcp_session:start(Socket,
 					       State#state.module,
 					       State#state.args) of
 			{ok,Pid} ->
