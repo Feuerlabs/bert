@@ -7,7 +7,7 @@
 
 -module(bert_rpc_exec).
 
--behaviour(exo_tcp_server).
+-behaviour(exo_socket_server).
 
 -include("bert.hrl").
 %%
@@ -37,24 +37,42 @@
 -export([init/2, data/3, close/2, error/3]).
 
 -export([start/0, start/2]).
+-export([start_ssl/0, start_ssl/2]).
+
+-define(dbg(F,A), io:format((F),(A))).
 
 start() ->
     start(?BERT_PORT,[]).
 
 start(Port, Options) ->
-    exo_tcp_server:start(Port, [{active,once},{packet,4},binary,
-				{reuseaddr,true}], ?MODULE, Options).
+    exo_socket_server:start(Port,[tcp],
+			    [{active,once},{packet,4},binary,
+			     {reuseaddr,true}], ?MODULE, Options).
+
+start_ssl() ->
+    start_ssl(?BERT_PORT,[]).
+
+start_ssl(Port, Options) ->
+    Dir = code:priv_dir(bert),
+    exo_socket_server:start(Port,[tcp,probe_ssl],
+			    [{active,once},{packet,4},binary,
+			     {debug, true},
+			     {verify, verify_none}, %% no client cert required
+			     %% server demo - cert
+			     {keyfile, filename:join(Dir, "host.key")},
+			     {certfile, filename:join(Dir, "host.cert")},
+			     {reuseaddr,true}], ?MODULE, Options).
 
 init(Socket, Options) ->
-    {ok,{IP,Port}} = inet:peername(Socket),
-    io:format("bert_rpc_exec: connection from: ~p : ~p\n", [IP, Port]),
+    {ok,{IP,Port}} = exo_socket:peername(Socket),
+    ?dbg("bert_rpc_exec: connection from: ~p : ~p\n", [IP, Port]),
     Access = proplists:get_value(access, Options, []),
     {ok, #state{ access=Access}}.
 
 data(Socket, Data, State) ->
     try bert:to_term(Data) of
 	Request ->
-	    io:format("bert_rpc_exec: request: ~w\n", [Request]),
+	    ?dbg("bert_rpc_exec: request: ~w\n", [Request]),
 	    handle_request(Socket, Request, State)
     catch
 	error:_Error ->
@@ -63,17 +81,25 @@ data(Socket, Data, State) ->
 			<<"unable to decode">>,
 			%% fixme: encode backtrace
 			[]}},
-	    gen_tcp:send(Socket, bert:to_binary(B)),
+	    exo_socket:send(Socket, bert:to_binary(B)),
 	    {ok,State}
     end.
-
+%%
+%% close - retrive statistics
+%% transport socket SHOULD still be open, but ssl may not handle this!
+%% 
 close(Socket, State) ->
-    {ok,Stats} = inet:getstat(Socket, inet:stats()),
-    io:format("bert_rpc_exec: close, stats=~w\n", [Stats]),
-    {ok, State}.
+    case exo_socket:getstat(Socket, exo_socket:stats()) of
+	{ok,_Stats} ->
+	    ?dbg("bert_rpc_exec: close, stats=~w\n", [_Stats]),
+	    {ok, State};
+	{error,_Reason} ->
+	    ?dbg("bert_rpc_exec: close, stats error=~w\n", [_Reason]),
+	    {ok, State}
+    end.
 
 error(_Socket,Error,State) ->
-    io:format("bert_rpc_exec: error = ~p\n", [Error]),
+    ?dbg("bert_rpc_exec: error = ~p\n", [Error]),
     {stop, Error, State}.
 	    
 %%
@@ -90,7 +116,7 @@ handle_request(Socket, Request, State) ->
 		    try	apply(Module,Function,Arguments) of
 			Result ->
 			    B = {reply,Result},
-			    gen_tcp:send(Socket, bert:to_binary(B)),
+			    exo_socket:send(Socket, bert:to_binary(B)),
 			    {ok,reset_state(State)}
 		    catch
 			error:Error ->
@@ -99,14 +125,14 @@ handle_request(Socket, Request, State) ->
 			    B = {error,{server,2,<<"BERTError">>,
 					Detail,
 					Trace}},
-			    gen_tcp:send(Socket, bert:to_binary(B)),
+			    exo_socket:send(Socket, bert:to_binary(B)),
 			    {ok,reset_state(State)}
 		    end;
 		{error,ServerCode,Detail} ->
 		    B = {error,{server,ServerCode,<<"BERTError">>,
 				Detail,
 				[]}},
-		    gen_tcp:send(Socket, bert:to_binary(B)),
+		    exo_socket:send(Socket, bert:to_binary(B)),
 		    {ok,reset_state(State)}
 	    end;
 	
@@ -116,7 +142,7 @@ handle_request(Socket, Request, State) ->
 	    case access_test(Module,Function,length(Arguments),State) of
 		ok ->
 		    B = {noreply},
-		    gen_tcp:send(Socket, bert:to_binary(B)),
+		    exo_socket:send(Socket, bert:to_binary(B)),
 		    try apply(Module,Function,Arguments) of
 			Value ->
 			    callback(Value, State)
@@ -128,7 +154,7 @@ handle_request(Socket, Request, State) ->
 		    B = {error,{server,ServerCode,<<"BERTError">>,
 				Detail,
 				[]}},
-		    gen_tcp:send(Socket, bert:to_binary(B)),
+		    exo_socket:send(Socket, bert:to_binary(B)),
 		    {ok,reset_state(State)}
 	    end;
 
@@ -149,7 +175,7 @@ handle_request(Socket, Request, State) ->
 			<<"protocol error">>,
 			%% backtrace
 			[]}},
-	    gen_tcp:send(Socket, bert:to_binary(B)),
+	    exo_socket:send(Socket, bert:to_binary(B)),
 	    {ok,State} 
     end.
 
@@ -189,7 +215,7 @@ callback(Value, State) ->
 		    catch bert_rpc:cast_host(Host,Port, M, F, A ++ [Value]),
 		    {ok, State#state { callback = []}};
 		_Serv ->
-		    io:format("callback bad service = ~p\n", [_Serv]),
+		    ?dbg("callback bad service = ~p\n", [_Serv]),
 		    {ok, State#state { callback = []}}
 	    end
     end.
