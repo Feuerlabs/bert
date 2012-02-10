@@ -1,5 +1,5 @@
 all:
-	rebar compile
+	./rebar compile
 
 edoc:
-	rebar doc
+	./rebar doc
