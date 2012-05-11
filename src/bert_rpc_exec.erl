@@ -47,9 +47,14 @@ start() ->
     start(?BERT_PORT,[]).
 
 start(Port, Options) ->
-    exo_socket_server:start(Port,[tcp],
-			    [{active,once},{packet,4},binary,
-			     {reuseaddr,true}], ?MODULE, Options).
+    case lists:keymember(ssl, 1, Options) of
+	{_, true} ->
+	    start_ssl(Port, Options);
+	_ ->
+	    exo_socket_server:start(Port,[tcp],
+				    [{active,once},{packet,4},binary,
+				     {reuseaddr,true}], ?MODULE, Options)
+    end.
 
 start_link(Options) ->
     case lists:keyfind(port, 1, Options) of
