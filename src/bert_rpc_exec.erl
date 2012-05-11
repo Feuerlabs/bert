@@ -10,12 +10,13 @@
 -behaviour(exo_socket_server).
 
 -include("bert.hrl").
+-include_lib("lager/include/log.hrl").
 %%
 %% FIXME:
 %%  support for ssl transport
 %%  optional support for authentication
 %%  optional support for ssl upgrade
-%%  
+%%
 %%  access list elements
 -type access_mfa() :: atom() | mfa().
 -type access_element() :: {access_mfa(),cache_options()}.
@@ -36,6 +37,7 @@
 
 -export([init/2, data/3, close/2, error/3]).
 
+-export([start_link/1]).
 -export([start/0, start/2]).
 -export([start_ssl/0, start_ssl/2]).
 
@@ -48,6 +50,19 @@ start(Port, Options) ->
     exo_socket_server:start(Port,[tcp],
 			    [{active,once},{packet,4},binary,
 			     {reuseaddr,true}], ?MODULE, Options).
+
+start_link(Options) ->
+    case lists:keyfind(port, 1, Options) of
+	false ->
+	    erlang:error(unknown_port);
+	{_, Port} ->
+	    case lists:keyfind(ssl, 1, Options) of
+		{_, true} ->
+		    start_ssl(Port, Options);
+		_ ->
+		    start(Port, Options)
+	    end
+    end.
 
 start_ssl() ->
     start_ssl(?BERT_PORT,[]).
@@ -65,14 +80,14 @@ start_ssl(Port, Options) ->
 
 init(Socket, Options) ->
     {ok,{IP,Port}} = exo_socket:peername(Socket),
-    ?dbg("bert_rpc_exec: connection from: ~p : ~p\n", [IP, Port]),
+    ?debug("bert_rpc_exec: connection from: ~p : ~p\n", [IP, Port]),
     Access = proplists:get_value(access, Options, []),
     {ok, #state{ access=Access}}.
 
 data(Socket, Data, State) ->
     try bert:to_term(Data) of
 	Request ->
-	    ?dbg("bert_rpc_exec: request: ~w\n", [Request]),
+	    ?debug("bert_rpc_exec: request: ~w\n", [Request]),
 	    handle_request(Socket, Request, State)
     catch
 	error:_Error ->
@@ -87,24 +102,24 @@ data(Socket, Data, State) ->
 %%
 %% close - retrive statistics
 %% transport socket SHOULD still be open, but ssl may not handle this!
-%% 
+%%
 close(Socket, State) ->
     case exo_socket:getstat(Socket, exo_socket:stats()) of
 	{ok,_Stats} ->
-	    ?dbg("bert_rpc_exec: close, stats=~w\n", [_Stats]),
+	    ?debug("bert_rpc_exec: close, stats=~w\n", [_Stats]),
 	    {ok, State};
 	{error,_Reason} ->
-	    ?dbg("bert_rpc_exec: close, stats error=~w\n", [_Reason]),
+	    ?debug("bert_rpc_exec: close, stats error=~w\n", [_Reason]),
 	    {ok, State}
     end.
 
 error(_Socket,Error,State) ->
-    ?dbg("bert_rpc_exec: error = ~p\n", [Error]),
+    ?debug("bert_rpc_exec: error = ~p\n", [Error]),
     {stop, Error, State}.
-	    
+
 %%
 %% Internal
-%%	
+%%
 handle_request(Socket, Request, State) ->
     case Request of
 	{call,Module,Function,Arguments} when is_atom(Module),
@@ -135,7 +150,7 @@ handle_request(Socket, Request, State) ->
 		    exo_socket:send(Socket, bert:to_binary(B)),
 		    {ok,reset_state(State)}
 	    end;
-	
+
 	{cast,Module,Function,Arguments} when is_atom(Module),
 					      is_atom(Function),
 					      is_list(Arguments) ->
@@ -176,7 +191,7 @@ handle_request(Socket, Request, State) ->
 			%% backtrace
 			[]}},
 	    exo_socket:send(Socket, bert:to_binary(B)),
-	    {ok,State} 
+	    {ok,State}
     end.
 
 reset_state(State) ->
@@ -197,12 +212,12 @@ encode_stacktrace([{M,F,A,L}|Ts]) ->
 	    end,
     File = proplists:get_value(file, L, "*"),
     Line = proplists:get_value(line, L, 0),
-    E = list_to_binary(io_lib:format("~s:~w: ~w:~w/~w", 
+    E = list_to_binary(io_lib:format("~s:~w: ~w:~w/~w",
 				     [File,Line,M,F,Arity])),
     [E | encode_stacktrace(Ts)];
 encode_stacktrace([]) ->
     [].
-    
+
 
 callback(Value, State) ->
     case State#state.callback of
@@ -215,11 +230,11 @@ callback(Value, State) ->
 		    catch bert_rpc:cast_host(Host,Port, M, F, A ++ [Value]),
 		    {ok, State#state { callback = []}};
 		_Serv ->
-		    ?dbg("callback bad service = ~p\n", [_Serv]),
+		    ?debug("callback bad service = ~p\n", [_Serv]),
 		    {ok, State#state { callback = []}}
 	    end
     end.
-    
+
 access_test(M,F,A, State) ->
     Access = State#state.access,
     if Access =:= [] ->  %% full access!!!
@@ -239,7 +254,7 @@ access_test(M,F,A, State) ->
 	    end
     end.
 
-    
+
 access_check(M,F,A, _State) ->
     case code:ensure_loaded(M) of
 	false ->
@@ -260,6 +275,3 @@ access_check(M,F,A, _State) ->
 		    ok
 	    end
     end.
-		    
-		    
-
