@@ -91,10 +91,10 @@ data(Socket, Data, State) ->
 	    handle_request(Socket, Request, State)
     catch
 	error:_Error ->
-	    B = {error,{protcol,0,<<"BERTError">>,
+	    B = {error,{protcol,?PROT_ERR_UNDESIGNATED,<<"BERTError">>,
 			%% detail
 			<<"unable to decode">>,
-			%% fixme: encode backtrace
+			%% backtrace?
 			[]}},
 	    exo_socket:send(Socket, bert:to_binary(B)),
 	    {ok,State}
@@ -131,23 +131,26 @@ handle_request(Socket, Request, State) ->
 		    try	apply(Module,Function,Arguments) of
 			Result ->
 			    B = {reply,Result},
-			    exo_socket:send(Socket, bert:to_binary(B)),
-			    {ok,reset_state(State)}
+			    try bert:to_binary(B) of
+				Bin ->
+				    exo_socket:send(Socket, Bin),
+				    {ok,reset_state(State)}
+			    catch
+				error:Error ->
+				    Trace = erlang:get_stacktrace(),
+				    Detail = list_to_binary(io_lib:format("~p",[Error])),
+				    send_server_error(Socket, 2, Detail, Trace),
+				    {ok,reset_state(State)}
+			    end
 		    catch
 			error:Error ->
-			    Trace = encode_stacktrace(erlang:get_stacktrace()),
-			    Detail=list_to_binary(io_lib:format("~p",[Error])),
-			    B = {error,{server,2,<<"BERTError">>,
-					Detail,
-					Trace}},
-			    exo_socket:send(Socket, bert:to_binary(B)),
+			    Trace = erlang:get_stacktrace(),
+			    Detail = list_to_binary(io_lib:format("~p",[Error])),
+			    send_server_error(Socket, 2, Detail, Trace),
 			    {ok,reset_state(State)}
 		    end;
 		{error,ServerCode,Detail} ->
-		    B = {error,{server,ServerCode,<<"BERTError">>,
-				Detail,
-				[]}},
-		    exo_socket:send(Socket, bert:to_binary(B)),
+		    send_server_error(Socket, ServerCode, Detail, []),
 		    {ok,reset_state(State)}
 	    end;
 
@@ -166,10 +169,7 @@ handle_request(Socket, Request, State) ->
 			    {ok,reset_state(State)}
 		    end;
 		{error,ServerCode,Detail} ->
-		    B = {error,{server,ServerCode,<<"BERTError">>,
-				Detail,
-				[]}},
-		    exo_socket:send(Socket, bert:to_binary(B)),
+		    send_server_error(Socket, ServerCode, Detail, []),
 		    {ok,reset_state(State)}
 	    end;
 
@@ -185,12 +185,8 @@ handle_request(Socket, Request, State) ->
 	    {ok, State#state { stream = true }};
 
 	_Other ->
-	    B = {error,{server,0,<<"BERTError">>,
-			%% detail
-			<<"protocol error">>,
-			%% backtrace
-			[]}},
-	    exo_socket:send(Socket, bert:to_binary(B)),
+	    send_server_error(Socket, ?SERV_ERR_UNDESIGNATED,
+			      <<"protocol error">>, []),
 	    {ok,State}
     end.
 
@@ -199,6 +195,10 @@ reset_state(State) ->
 		  cache    = [],
 		  callback = [] }.
 
+send_server_error(Socket, ServerCode, Detail, StackTrace) ->
+    Trace = encode_stacktrace(StackTrace),
+    B = {error,{server,ServerCode,<<"BERTError">>, Detail, Trace}},
+    exo_socket:send(Socket, bert:to_binary(B)).
 
 encode_stacktrace([{M,F,A}|Ts]) ->
     Arity = if is_integer(A) -> A;

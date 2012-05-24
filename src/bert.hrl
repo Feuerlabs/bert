@@ -5,7 +5,7 @@
 
 -define(PROT_ERR_UNDESIGNATED,          0).
 -define(PROT_ERR_UNABLE_TO_READ_HEADER, 1).
--define(PROT_ERR__UNABLE_TO_READ_DATA,   2).
+-define(PROT_ERR_UNABLE_TO_READ_DATA,   2).
 
 -define(SERV_ERR_UNDESIGNATED,          0).
 -define(SERV_ERR_NO_SUCH_MODULE,        1).
