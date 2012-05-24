@@ -38,8 +38,10 @@
 -export([init/2, data/3, close/2, error/3]).
 
 -export([start_link/1]).
--export([start/0, start/2]).
--export([start_ssl/0, start_ssl/2]).
+-export([start/0, start/2, start/3]).
+-export([start_ssl/0, start_ssl/2, start_ssl/3]).
+-export([get_session/5]).
+-export([reuse_init/2]).
 
 -define(dbg(F,A), io:format((F),(A))).
 
@@ -47,13 +49,17 @@ start() ->
     start(?BERT_PORT,[]).
 
 start(Port, Options) ->
+    start(Port, Options, []).
+
+start(Port, Options, ExoOptions) ->
     case lists:keymember(ssl, 1, Options) of
 	{_, true} ->
 	    start_ssl(Port, Options);
 	_ ->
 	    exo_socket_server:start(Port,[tcp],
 				    [{active,once},{packet,4},binary,
-				     {reuseaddr,true}], ?MODULE, Options)
+				     {reuseaddr,true} | ExoOptions],
+				    ?MODULE, Options)
     end.
 
 start_link(Options) ->
@@ -61,11 +67,12 @@ start_link(Options) ->
 	false ->
 	    erlang:error(unknown_port);
 	{_, Port} ->
+	    Exo = proplists:get_value(exo, Options, []),
 	    case lists:keyfind(ssl, 1, Options) of
 		{_, true} ->
-		    start_ssl(Port, Options);
+		    start_ssl(Port, Options, Exo);
 		_ ->
-		    start(Port, Options)
+		    start(Port, Options, Exo)
 	    end
     end.
 
@@ -73,6 +80,9 @@ start_ssl() ->
     start_ssl(?BERT_PORT,[]).
 
 start_ssl(Port, Options) ->
+    start_ssl(Port, Options, []).
+
+start_ssl(Port, Options, ExoOptions) ->
     Dir = code:priv_dir(bert),
     exo_socket_server:start(Port,[tcp,probe_ssl],
 			    [{active,once},{packet,4},binary,
@@ -81,7 +91,28 @@ start_ssl(Port, Options) ->
 			     %% server demo - cert
 			     {keyfile, filename:join(Dir, "host.key")},
 			     {certfile, filename:join(Dir, "host.cert")},
-			     {reuseaddr,true}], ?MODULE, Options).
+			     {reuseaddr,true} | ExoOptions], ?MODULE, Options).
+
+
+get_session(IP, Port, Protos, Opts, Timeout) ->
+    case whereis(?MODULE) of
+	undefined ->
+	    exo_socket:connect(IP, Port, Protos, Opts, Timeout);
+	_ ->
+	    case gen_server:call(
+		   ?MODULE, {get_session, IP, Port, [Protos, Opts, Timeout]}) of
+		connect ->
+		    exo_socket:connect(IP, Port, Protos, Opts, Timeout);
+		rejected ->
+		    {error, no_connection};
+		Pid when is_pid(Pid) ->
+		    {ok, Pid}
+	    end
+    end.
+
+reuse_init(_, _) ->
+    register(?MODULE, self()),
+    {ok, []}.
 
 init(Socket, Options) ->
     {ok,{IP,Port}} = exo_socket:peername(Socket),
@@ -188,6 +219,15 @@ handle_request(Socket, Request, State) ->
 	{info, stream, []} ->
 	    %% client will send call data as a stream
 	    {ok, State#state { stream = true }};
+
+	{noreply} ->
+	    {reply, noreply, State};
+
+	{reply, Reply} ->
+	    {reply, Reply, State};
+
+	{error,_} = Error ->
+	    {reply, Error, State};
 
 	_Other ->
 	    send_server_error(Socket, ?SERV_ERR_UNDESIGNATED,
