@@ -7,6 +7,6 @@
                   kernel,
                   stdlib
                  ]},
-  {mod, { bert_app, []}},
+%%  {mod, { bert_app, []}}, %% No supervisor needed
   {env, []}
  ]}.

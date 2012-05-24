@@ -61,12 +61,7 @@ start_link(Options) ->
 	false ->
 	    erlang:error(unknown_port);
 	{_, Port} ->
-	    case lists:keyfind(ssl, 1, Options) of
-		{_, true} ->
-		    start_ssl(Port, Options);
-		_ ->
-		    start(Port, Options)
-	    end
+	    start(Port, Options)
     end.
 
 start_ssl() ->
