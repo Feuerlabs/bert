@@ -38,6 +38,7 @@
 
 -define(dbg(F,A), io:format((F),(A))).
 
+
 %%% @doc
 %%%    Call local host on BERT "standard port" 9999
 %%% @end
@@ -194,7 +195,8 @@ handle_result(XSocket, Stream, CacheInfo) ->
     {Tag,Tag_closed,Tag_error} = exo_socket:tags(XSocket),
     Socket = exo_socket:socket(XSocket),
     receive
-	{Tag, Socket, Data} ->
+	{Tag, Socket, Data0} ->
+	    Data = exo_socket:auth_incoming(XSocket, Data0),
 	    case bert:to_term(Data) of
 		{info, stream, []} ->
 		    exo_socket:setopts(XSocket, [{active, once}]),
@@ -250,8 +252,9 @@ open(IP, Port) ->
     open(IP, Port, [tcp], ?CONNECT_TIMEOUT).
 
 open(IP, Port, Protos, Timeout) ->
+    AuthOptions = bert_rpc:auth_options(),
     SSLOptions = [{verify, verify_none}],
-    Opts = [binary, {packet,4}, {active,once}] ++ SSLOptions,
+    Opts = [binary, {packet,4}, {active,once}] ++ SSLOptions ++ AuthOptions,
     bert_rpc_exec:get_session(IP, Port, Protos, Opts, Timeout).
 %%%
 %%% @doc

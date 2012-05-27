@@ -16,6 +16,7 @@
 -export([call/4, cast/4, info/3]).
 -export([open/0, open/1, open/2, open/4]).
 -export([close/1, read_chunk/1]).
+-export([auth_options/0]).
 
 -type call_result() :: 
 	{reply,Result::term(),CacheInfo::cache_info()} |
@@ -59,13 +60,18 @@ call_host(Host, Mod, Fun, Args) ->
 		       call_result().    
 call_host(Host, Port, Protos, Mod, Fun, Args)
   when is_atom(Mod), is_atom(Fun), is_list(Args) ->
-    {ok,Socket} = open(Host, Port, Protos, ?CONNECT_TIMEOUT),
-    case call(Socket, Mod, Fun, Args) of
-	Stream = {stream,_Socket,_CacheInfo} ->
-	    Stream;
-	Result ->
-	    close(Socket),
-	    Result
+    case open(Host, Port, Protos, ?CONNECT_TIMEOUT) of
+	{ok, Socket} ->
+	    case call(Socket, Mod, Fun, Args) of
+		Stream = {stream,_Socket,_CacheInfo} ->
+		    Stream;
+		Result ->
+		    close(Socket),
+		    Result
+	    end;
+	Other ->
+	    io:fwrite("open(...) -> ~p~n", [Other]),
+	    Other
     end.
 
 %%% @doc
@@ -174,7 +180,8 @@ handle_result(XSocket, Stream, CacheInfo) ->
     {Tag,Tag_closed,Tag_error} = exo_socket:tags(XSocket),
     Socket = exo_socket:socket(XSocket),
     receive
-	{Tag, Socket, Data} ->
+	{Tag, Socket, Data0} ->
+	    Data = exo_socket:auth_incoming(XSocket, Data0),
 	    case bert:to_term(Data) of
 		{info, stream, []} ->
 		    exo_socket:setopts(XSocket, [{active, once}]),
@@ -230,9 +237,42 @@ open(IP, Port) ->
     open(IP, Port, [tcp], ?CONNECT_TIMEOUT).
 
 open(IP, Port, Protos, Timeout) ->
+    AuthOptions = auth_options(),
     SSLOptions = [{verify, verify_none}],
-    exo_socket:connect(IP, Port, Protos, [binary, {packet,4}, {active,once}] ++
-			   SSLOptions,  Timeout).
+    exo_socket:connect(IP, Port, Protos,
+		       [binary, {packet,4}, {active,once}]
+		       ++ SSLOptions
+		       ++ AuthOptions,  Timeout).
+
+auth_options() ->
+    case application:get_env(bert,auth) of
+	{ok, Auth} ->
+	    client_auth_opt(Auth);
+	_ ->
+	    []
+    end.
+
+client_auth_opt(false) -> [];
+client_auth_opt(undefined) -> [];
+client_auth_opt(L) when is_list(L) ->
+    case lists:keyfind(client, 1, L) of
+	false -> [];
+	{_, false} -> [];
+	{_, Opts} ->
+	    Opts1 = case lists:keyfind(mod, 1, Opts) of
+			{_, _} -> Opts;
+			false -> [{mod, bert_challenge}|Opts]
+		    end,
+	    [{auth, [{client, Opts1}]}]
+    end;
+client_auth_opt({ID, MyP, TheirP}) ->
+    [{auth, [{client, [{mod, bert_challenge},
+		       {id, ID},
+		       {keys, {MyP, TheirP}}]
+	     }]
+     }].
+
+
 %%%
 %%% @doc
 %%%    Close a transport connection

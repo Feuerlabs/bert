@@ -54,7 +54,7 @@ start(Port, Options) ->
 start(Port, Options, ExoOptions) ->
     case lists:keymember(ssl, 1, Options) of
 	{_, true} ->
-	    start_ssl(Port, Options);
+	    start_ssl(Port, Options, ExoOptions);
 	_ ->
 	    exo_socket_server:start(Port,[tcp],
 				    [{active,once},{packet,4},binary,
@@ -162,9 +162,9 @@ handle_request(Socket, Request, State) ->
 					      is_atom(Function),
 					      is_list(Arguments) ->
 	    case access_test(Module,Function,length(Arguments),State) of
-		ok ->
+		{ok, {M, F, _A}} ->
 		    %% handle security  + stream input ! + stream output
-		    try	apply(Module,Function,Arguments) of
+		    try	apply(M, F, Arguments) of
 			Result ->
 			    B = {reply,Result},
 			    try bert:to_binary(B) of
@@ -285,19 +285,49 @@ access_test(M,F,A, State) ->
     if Access =:= [] ->  %% full access!!!
 	    access_check(M,F,A,State);
        true ->
-	    case lists:member(M, Access) of
+	    case check_list(Access, M, F, A) of
 		false ->
-		    case lists:member({M,F,A}, Access) of
-			false ->
-			    {error, ?SERV_ERR_NO_SUCH_FUNCTION,
-			     <<"access denied">>};
-			true ->
-			    access_check(M,F,A,State)
-		    end;
-		true ->
-		    access_check(M,F,A,State)
+		    {error, ?SERV_ERR_NO_SUCH_FUNCTION,
+		     <<"access denied">>};
+		{M1, F1, A1} ->
+		    access_check(M1, F1, A1, State)
 	    end
+	    %% case lists:member(M, Access) of
+	    %% 	false ->
+	    %% 	    case lists:member({M,F,A}, Access) of
+	    %% 		false ->
+	    %% 		    {error, ?SERV_ERR_NO_SUCH_FUNCTION,
+	    %% 		     <<"access denied">>};
+	    %% 		true ->
+	    %% 		    access_check(M,F,A,State)
+	    %% 	    end;
+	    %% 	true ->
+	    %% 	    access_check(M,F,A,State)
+	    %% end
     end.
+
+check_list([{verify, {Mv,Fv}}|T], M, F, A) ->
+    case Mv:Fv(M, F, A) of
+	continue -> check_list(T, M, F, A);
+	{_,_,_} = MFA1 -> MFA1;
+	false -> false
+    end;
+check_list([{redirect, [_|_] = Ms}|T], M, F, A) ->
+    case lists:keyfind(M, 1, Ms) of
+	{M, M1} ->
+	    check_list(T, M1, F, A);
+	false ->
+	    case lists:keyfind({M,F,A}, 1, Ms) of
+		false ->
+		    check_list(T, M, F, A);
+		{_, {_,_,_} = MFA1} ->
+		    MFA1
+	    end
+    end;
+check_list([M|_], M, F, A)             -> {M, F, A};
+check_list([{M,F,A} = MFA|_], M, F, A) -> MFA;
+check_list([_|T], M, F, A)             -> check_list(T, M, F, A);
+check_list([], _, _, _)                -> false.
 
 
 access_check(M,F,A, _State) ->
@@ -311,12 +341,12 @@ access_check(M,F,A, _State) ->
 		false ->
 		    case erlang:is_builtin(M,F,A) of
 			true ->
-			    ok;
+			    {ok, {M,F,A}};
 			false ->
 			    {error, ?SERV_ERR_NO_SUCH_FUNCTION,
 			     <<"function not defined">>}
 		    end;
 		true ->
-		    ok
+		    {ok, {M,F,A}}
 	    end
     end.
