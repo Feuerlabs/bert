@@ -7,6 +7,10 @@
 
 -compile(export_all).
 
+%-include_lib("lager/include/log.hrl").
+-define(debug(Fmt, Args), ok).
+-define(error(Fmt, Args), error_logger:format(Fmt, Args)).
+
 -record(data, {
 	  id,
 	  chal,
@@ -17,11 +21,11 @@
 
 -define(TIMEOUT, 10000).
 
--define(dbg(Fmt,A), io:fwrite("~p-~p: " ++ Fmt,[?MODULE,?LINE|A])).
+%%-define(dbg(Fmt,A), io:fwrite("~p-~p: " ++ Fmt,[?MODULE,?LINE|A])).
 
 authenticate(Socket, Role, Opts) ->
     try
-	?dbg("authenticate, client side~n", []),
+	?debug("authenticate, client side~n", []),
 	%% St = init(ID, MyKey, TheirKey),
 	St = init(Opts),
 	if Role == client ->
@@ -31,15 +35,15 @@ authenticate(Socket, Role, Opts) ->
 	end
     catch
 	error:E ->
-	    io:fwrite("~p: ERROR: ~p~n~p~n",
-		      [?MODULE, E, erlang:get_stacktrace()])
+	    ?error("~p: ERROR: ~p~n~p~n",
+		   [?MODULE, E, erlang:get_stacktrace()])
     end.
 %% authenticate(Socket, {server, ID, {M,F}}) ->
-%%     ?dbg("authenticate, server side dynamic~n", []),
+%%     ?debug("authenticate, server side dynamic~n", []),
 %%     St = init(ID, undefined, {M,F}),
 %%     await_first_challenge(Socket, St);
 %% authenticate(Socket, {server, ID, MyKey, TheirKey}) ->
-%%     ?dbg("authenticate, server side~n", []),
+%%     ?debug("authenticate, server side~n", []),
 %%     St = init(ID, MyKey, TheirKey),
 %%     await_first_challenge(Socket, St).
 
@@ -51,11 +55,11 @@ outgoing(Data, St) ->
 incoming(<<Tok:4/binary, Data/binary>>, St) ->
     case check_token(Tok, Data, St) of
 	true ->
-	    ?dbg("incoming token verified~n"
-		 "Data = ~p~n", [Data]),
+	    ?debug("incoming token verified~n"
+		   "Data = ~p~n", [Data]),
 	    Data;
 	false ->
-	    ?dbg("bad incoming token~n", []),
+	    ?debug("bad incoming token~n", []),
 	    error(bad_token)
     end.
 
@@ -64,49 +68,49 @@ remote_id(#st{theirs = #data{id = ID}}) ->
 
 %% client (1)
 send_first_challenge(Socket, St) ->
-    ?dbg("Sending first challenge~n", []),
+    ?debug("Sending first challenge~n", []),
     {Bin, St1} = init_challenge(St),
     exo_socket:send(Socket, Bin),
     await_response(Socket, St1).
 
 %% server (1)
 await_first_challenge(Socket, St) ->
-    ?dbg("await_first_challenge~n", []),
+    ?debug("await_first_challenge~n", []),
     Data = recv(Socket),
     case recv_challenge(Data, St) of
 	error ->
-	    ?dbg("auth error~n", []),
+	    ?debug("auth error~n", []),
 	    error;
 	{Response, St1} ->
-	    io:fwrite("received good challenge~n", []),
+	    ?debug("received good challenge~n", []),
 	    exo_socket:send(Socket, Response),
 	    await_ack(Socket, St1)
     end.
 
 %% client (2)
 await_response(Socket, St) ->
-    ?dbg("await_response~n", []),
+    ?debug("await_response~n", []),
     Data = recv(Socket),
     case recv_challenge(Data, St) of
 	error ->
-	    ?dbg("auth error~n", []),
+	    ?debug("auth error~n", []),
 	    error;
 	{Response, St1} ->
-	    ?dbg("received good response - auth ok~n", []),
+	    ?debug("received good response - auth ok~n", []),
 	    exo_socket:send(Socket, Response),
 	    {ok, St1}
     end.
 
 %% server (2)
 await_ack(Socket, St) ->
-    ?dbg("await_ack~n", []),
+    ?debug("await_ack~n", []),
     Data = recv(Socket),
     case recv_challenge(Data, St) of
 	error ->
-	    ?dbg("auth error~n", []),
+	    ?debug("auth error~n", []),
 	    error;
 	{_, St1} ->
-	    ?dbg("received good ack - auth ok.~n", []),
+	    ?debug("received good ack - auth ok.~n", []),
 	    {ok, St1}
     end.
 
@@ -123,7 +127,7 @@ rand_bytes(N) ->
 %% 	theirs = #data{key = TheirKey}}.
 
 init(Opts) ->
-    io:fwrite("~p: init(~p)~n", [?MODULE, Opts]),
+    ?debug("~p: init(~p)~n", [?MODULE, Opts]),
     Chal = rand_bytes(4),
     MyId = proplists:get_value(id, Opts, undefined),
     case proplists:get_value(keys, Opts) of
