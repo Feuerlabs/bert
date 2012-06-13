@@ -35,8 +35,9 @@ authenticate(Socket, Role, Opts) ->
 	end
     catch
 	error:E ->
-	    ?error("~p: ERROR: ~p~n~p~n",
-		   [?MODULE, E, erlang:get_stacktrace()])
+	    io:fwrite("~p: ERROR: ~p~n~p~n",
+		      [?MODULE, E, erlang:get_stacktrace()]),
+	    {error, E}
     end.
 %% authenticate(Socket, {server, ID, {M,F}}) ->
 %%     ?debug("authenticate, server side dynamic~n", []),

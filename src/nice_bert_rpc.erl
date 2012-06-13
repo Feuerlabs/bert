@@ -166,10 +166,11 @@ info(XSocket, Command, Options) ->
 
 call(XSocket, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun), 
 				  is_list(Args) ->
-    B = bert:to_binary({call,Mod,Fun,Args}),
+    Req = {call,Mod,Fun,Args},
     if is_pid(XSocket) ->
-	    {reply, gen_server:call(XSocket, {call, B}), []};
+	    {reply, gen_server:call(XSocket, {call, Req}), []};
        true ->
+	    B = bert:to_binary(Req),
 	    exo_socket:send(XSocket, B),
 	    handle_result(XSocket, false, [])
     end.
@@ -180,13 +181,14 @@ call(XSocket, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun),
 
 cast(XSocket, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun), 
 				  is_list(Args) ->
-    B = bert:to_binary({cast,Mod,Fun,Args}),
+    Req = {cast,Mod,Fun,Args},
     if is_pid(XSocket) ->
-	    case gen_server:call(XSocket, {cast, B}) of
+	    case gen_server:call(XSocket, {cast, Req}) of
 		{noreply} -> noreply;
 		Other -> Other
 	    end;
        true ->
+	    B = bert:to_binary(Req),
 	    exo_socket:send(XSocket, B),
 	    handle_result(XSocket, false, [])
     end.
