@@ -133,7 +133,7 @@ reuse_init(_, _) ->
     {ok, []}.
 
 reuse_options(_Host, _Port, Args, _St) ->
-    io:fwrite("reuse_options(Args = ~p)~n", [Args]),
+    ?debug("reuse_options(Args = ~p)~n", [Args]),
     case proplists:get_value(access, Args, []) of
 	[] ->
 	    [];
