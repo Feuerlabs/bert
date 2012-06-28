@@ -1,3 +1,5 @@
+.PHONY:	doc
+
 all:
 	./rebar compile
 
