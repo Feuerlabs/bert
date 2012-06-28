@@ -1,5 +1,8 @@
 all:
 	./rebar compile
 
-edoc:
+doc:
 	./rebar doc
+
+pkg:	all doc
+	tetrapak pkg:ipkg
