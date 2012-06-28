@@ -382,7 +382,8 @@ callback(Value, State) ->
 	    case string:tokens(binary_to_list(Service), ":") of
 		[Host,PortString] ->
 		    Port = list_to_integer(PortString),
-		    catch bert_rpc:cast_host(Host,Port, M, F, A ++ [Value]),
+		    catch bert_rpc:cast_host(Host,Port,[tcp], 
+					     M, F, A ++ [Value]),
 		    {ok, State#state { callback = []}};
 		_Serv ->
 		    ?dbg("callback bad service = ~p\n", [_Serv]),
