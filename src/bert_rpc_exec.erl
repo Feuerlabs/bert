@@ -123,17 +123,25 @@ do_start_ssl(Port, Options, ExoOptions, StartF) when
 get_session(IP, Port, Protos, Opts, Timeout) ->
     case whereis(?MODULE) of
 	undefined ->
-	    exo_socket:connect(IP, Port, Protos, Opts, Timeout);
+	    maybe_connect(IP, Port, Protos, Opts, Timeout);
 	_ ->
 	    case gen_server:call(
 		   ?MODULE, {get_session, IP, Port, [Protos, Opts, Timeout]}) of
 		connect ->
-		    exo_socket:connect(IP, Port, Protos, Opts, Timeout);
+		    maybe_connect(IP, Port, Protos, Opts, Timeout);
 		rejected ->
 		    {error, no_connection};
 		Pid when is_pid(Pid) ->
 		    {ok, Pid}
 	    end
+    end.
+
+maybe_connect(IP, Port, Protos, Opts, Timeout) ->
+    case proplists:get_bool(auto_connect, Opts, true) of
+	true ->
+	    exo_socket:connect(IP, Port, Protos, Opts, Timeout);
+	false ->
+	    {error, no_connection}
     end.
 
 reuse_init(_, _) ->
@@ -179,26 +187,38 @@ data(Socket, Data, State) ->
 	    {ok,State}
     end.
 
-handle_call(C, {C, M,F,A} = Req, #state{remote_access = Access} = St) ->
-    ?dbg("handle_call(~p, Access=~p)~n", [Req, Access]),
-    if Access == [] ->
-	    {send, bert:to_binary(Req), St};
-       true ->
-	    case access_test(M,F,length(A), Access, false) of
-		{ok, {_M1,_F1,_A1}, _Conv} ->
-		    %% We now know that there is a pattern. Let the remote side
-		    %% do the conversion.
-		    {send, bert:to_binary(Req), St};
-			     %% {C, M1,F1, convert_args(Conv,A)}),St};
-		{error,ServerCode,Detail} ->
-		    Msg = server_error_msg(ServerCode, Detail, []),
-		    if C==call ->
-			    {reply, Msg, St};
-		       C==cast ->
-			    {ignore, St}
-		    end
-	    end
-    end.
+handle_call(_, get_access, #state{access = A} = State) ->
+    {reply, A, State};
+handle_call(_, {set_access, A}, State) ->
+    %% should perhaps check that it's a valid access list... FIXME
+    {reply, ok, State#state{access = A}};
+handle_call(C, {C, M,F,A} = Req, #state{} = St) ->
+    ?dbg("handle_call(~p)~n", [Req]),
+    {send, bert:to_binary(Req), St}.
+
+
+%% handle_call(C, {C, M,F,A} = Req, #state{remote_access = Access} = St) ->
+%%     ?dbg("handle_call(~p, Access=~p)~n", [Req, Access]),
+%%     if Access == [] ->
+%% 	    {send, bert:to_binary(Req), St};
+%%        true ->
+%% 	    case access_test(M,F,length(A), Access, false) of
+%% 		{ok, {_M1,_F1,_A1}, _Conv} ->
+%% 		    %% We now know that there is a pattern. Let the remote side
+%% 		    %% do the conversion.
+%% 		    {send, bert:to_binary(Req), St};
+%% 			     %% {C, M1,F1, convert_args(Conv,A)}),St};
+%% 		{error,ServerCode,Detail} ->
+%% 		    Msg = server_error_msg(ServerCode, Detail, []),
+%% 		    if C==call ->
+%% 			    {reply, Msg, St};
+%% 		       C==cast ->
+%% 			    {ignore, St}
+%% 		    end
+%% 	    end
+%%     end.
+
+
 %%
 %% close - retrive statistics
 %% transport socket SHOULD still be open, but ssl may not handle this!
@@ -229,7 +249,8 @@ handle_request(Socket, Request, State) ->
 			     State#state.access) of
 		{ok, {M, F, _A}, Conv} ->
 		    %% handle security  + stream input ! + stream output
-		    try	apply(M, F, convert_args(Conv, Arguments)) of
+		    NewArgs = convert_args(Conv, Arguments),
+		    try apply_f(M, F, NewArgs) of
 			Result ->
 			    B = {reply,Result},
 			    try bert:to_binary(B) of
@@ -300,6 +321,10 @@ handle_request(Socket, Request, State) ->
 	    {ok,State}
     end.
 
+apply_f(M, F, A) ->
+    apply(M, F, A).
+
+convert_args(keep, As) -> As;
 convert_args([H|T], Opts) when is_atom(H) ->
     case lists:keyfind(H, 1, Opts) of
 	{_, V} -> [V | convert_args(T, Opts)];
@@ -415,8 +440,8 @@ access_test(M,F,A, Access,Check) ->
 	    end
     end.
 
-check_list([{accept, M}|_], M, F, A) ->  {{M, F, A}, []};
-check_list([{accept, M, F, A}|_], M, F, A) -> {{M, F, A}, []};
+check_list([{accept, M}|_], M, F, A) ->  {{M, F, A}, keep};
+check_list([{accept, M, F, A}|_], M, F, A) -> {{M, F, A}, keep};
 check_list([{reject, M}|_], M, _, _) -> false;
 check_list([{reject, M, F, A}|_], M, F, A) -> false;
 check_list([{propargs,M,F,Args}|_], M, F, 1) ->
@@ -425,8 +450,8 @@ check_list([{propargs,M,F,Args}|_], M, F, 1) ->
 check_list([{verify, {Mv,Fv}}|T], M, F, A) ->
     case Mv:Fv(M, F, A) of
 	continue -> check_list(T, M, F, A);
-	{_,_,_} = MFA1 -> {MFA1, []};
-	{{_,_,_}, _} = Reply -> Reply;
+	{_,_,_} = MFA1 -> {MFA1, keep};
+	{{_,_,_}, Conv} = Reply when is_list(Conv); Conv==keep -> Reply;
 	false -> false
     end;
 check_list([{redirect, [_|_] = Ms}|T], M, F, A) ->
@@ -438,11 +463,11 @@ check_list([{redirect, [_|_] = Ms}|T], M, F, A) ->
 		false ->
 		    check_list(T, M, F, A);
 		{_, {_,_,_} = MFA1} ->
-		    {MFA1, []}
+		    {MFA1, keep}
 	    end
     end;
-check_list([M|_], M, F, A)             -> {{M, F, A}, []};
-check_list([{M,F,A} = MFA|_], M, F, A) -> {MFA, []};
+check_list([M|_], M, F, A)             -> {{M, F, A}, keep};
+check_list([{M,F,A} = MFA|_], M, F, A) -> {MFA, keep};
 check_list([_|T], M, F, A)             -> check_list(T, M, F, A);
 check_list([], _, _, _)                -> false.
 
@@ -460,7 +485,7 @@ access_check(M,F,A, Conv, true) ->
 		false ->
 		    case erlang:is_builtin(M,F,A) of
 			true ->
-			    {ok, {M,F,A}, []};
+			    {ok, {M,F,A}, Conv};
 			false ->
 			    {error, ?SERV_ERR_NO_SUCH_FUNCTION,
 			     <<"function not defined">>}
