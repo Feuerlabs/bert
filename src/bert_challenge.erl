@@ -16,9 +16,7 @@
 
 -compile(export_all).
 
-%-include_lib("lager/include/log.hrl").
--define(debug(Fmt, Args), ok).
--define(error(Fmt, Args), error_logger:format(Fmt, Args)).
+-include_lib("lager/include/log.hrl").
 
 -record(data, {
 	  id,
@@ -30,7 +28,7 @@
 
 -define(TIMEOUT, 10000).
 
-%%-define(dbg(Fmt,A), io:fwrite("~p-~p: " ++ Fmt,[?MODULE,?LINE|A])).
+%%-define(debug(Fmt,A), io:fwrite("~p-~p: " ++ Fmt,[?MODULE,?LINE|A])).
 
 authenticate(Socket, Role, Opts) ->
     try
@@ -79,6 +77,7 @@ remote_id(#st{theirs = #data{id = ID}}) ->
 send_first_challenge(Socket, St) ->
     ?debug("Sending first challenge~n", []),
     {Bin, St1} = init_challenge(St),
+    ?debug("Sending_first_challenge result ~p~n", [{Bin, St1} ]),
     exo_socket:send(Socket, Bin),
     await_response(Socket, St1).
 
@@ -150,8 +149,12 @@ init(Opts) ->
     end.
 
 init_challenge(#st{mine = #data{id = ID, chal = Chal, key = MyKey} = M} = S0) ->
+    ?debug("~p: init_challenge(~p)~n", [?MODULE, S0]),
+
     Tok = make_token_(ID, Chal, MyKey),
+    ?debug("~p: init_challenge() Token ~p~n", [?MODULE, Tok]),
     S1 = S0#st{mine = M#data{chal = Chal}},
+    ?debug("~p: init_challenge() S1 ~p~n", [?MODULE, S1]),
     {<<Chal:32/little, Tok/binary, ID/binary>>, S1}.
 
 recv_challenge(<<Chal:32/little, Tok:4/binary, P/binary>>,
