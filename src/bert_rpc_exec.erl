@@ -192,7 +192,7 @@ handle_call(_, get_access, #state{access = A} = State) ->
 handle_call(_, {set_access, A}, State) ->
     %% should perhaps check that it's a valid access list... FIXME
     {reply, ok, State#state{access = A}};
-handle_call(C, {C, M,F,A} = Req, #state{} = St) ->
+handle_call(C, {C, _M,_F,_A} = Req, #state{} = St) ->
     ?dbg("handle_call(~p)~n", [Req]),
     {send, bert:to_binary(Req), St}.
 
@@ -241,13 +241,16 @@ error(_Socket,Error,State) ->
 %% Internal
 %%
 handle_request(Socket, Request, State) ->
+    io:fwrite(user, "handle_request(Socket, ~p, State)~n", [Request]),
     case Request of
 	{call,Module,Function,Arguments} when is_atom(Module),
 					      is_atom(Function),
 					      is_list(Arguments) ->
+	    ?dbg("Request = ~p~n", [{call,Module,Function,Arguments}]),
 	    case access_test(Module,Function,length(Arguments),
 			     State#state.access) of
-		{ok, {M, F, _A}, Conv} ->
+		{ok, {M, F, _A}, Conv} = _AccessRes ->
+		    ?dbg("access_test() -> ~p~n", [_AccessRes]),
 		    %% handle security  + stream input ! + stream output
 		    NewArgs = convert_args(Conv, Arguments),
 		    try apply_f(M, F, NewArgs) of
@@ -271,7 +274,8 @@ handle_request(Socket, Request, State) ->
 			    send_server_error(Socket, 2, Detail, Trace),
 			    {ok,reset_state(State)}
 		    end;
-		{error,ServerCode,Detail} ->
+		{error,ServerCode,Detail} = _AccessErr ->
+		    ?dbg("access_test() -> ~p~n", [_AccessErr]),
 		    send_server_error(Socket, ServerCode, Detail, []),
 		    {ok,reset_state(State)}
 	    end;
@@ -429,7 +433,7 @@ access_test(M,F,A, Access) ->
 
 access_test(M,F,A, Access,Check) ->
     if Access =:= [] ->  %% full access!!!
-	    access_check(M,F,A,[],Check);
+	    access_check(M,F,A,keep,Check);
        true ->
 	    case check_list(Access, M, F, A) of
 		false ->
