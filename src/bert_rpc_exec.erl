@@ -137,7 +137,7 @@ get_session(IP, Port, Protos, Opts, Timeout) ->
     end.
 
 maybe_connect(IP, Port, Protos, Opts, Timeout) ->
-    case proplists:get_bool(auto_connect, Opts, true) of
+    case proplists:get_value(auto_connect, Opts, true) of
 	true ->
 	    exo_socket:connect(IP, Port, Protos, Opts, Timeout);
 	false ->
