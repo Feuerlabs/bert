@@ -5,7 +5,8 @@
   {registered, []},
   {applications, [
                   kernel,
-                  stdlib
+                  stdlib,
+		  exo
                  ]},
 %%  {mod, { bert_app, []}}, %% No supervisor needed
   {env, []}
