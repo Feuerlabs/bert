@@ -243,9 +243,14 @@ error(_Socket,Error,State) ->
 handle_request(Socket, Request, State) ->
     io:fwrite(user, "handle_request(Socket, ~p, State)~n", [Request]),
     case Request of
-	{call,Module,Function,Arguments} when is_atom(Module),
-					      is_atom(Function),
-					      is_list(Arguments) ->
+	{call,Module0,Function0,Arguments} when is_list(Arguments),
+						is_atom(Module0),
+						is_atom(Function0);
+						is_list(Arguments),
+						is_binary(Module0),
+						is_binary(Function0) ->
+	    Module = to_atom(Module0),
+	    Function = to_atom(Function0),
 	    ?dbg("Request = ~p~n", [{call,Module,Function,Arguments}]),
 	    case access_test(Module,Function,length(Arguments),
 			     State#state.access) of
@@ -280,9 +285,14 @@ handle_request(Socket, Request, State) ->
 		    {ok,reset_state(State)}
 	    end;
 
-	{cast,Module,Function,Arguments} when is_atom(Module),
-					      is_atom(Function),
-					      is_list(Arguments) ->
+	{cast,Module0,Function0,Arguments} when is_list(Arguments),
+						is_atom(Module0),
+						is_atom(Function0);
+						is_list(Arguments),
+						is_binary(Module0),
+						is_binary(Function0) ->
+	    Module = to_atom(Module0),
+	    Function = to_atom(Function0),
 	    case access_test(Module,Function,length(Arguments),State) of
 		ok ->
 		    B = {noreply},
@@ -373,6 +383,8 @@ to_atom(B) when is_binary(B) ->
     binary_to_atom(B, latin1);
 to_atom(L) when is_list(L) ->
     list_to_atom(L);
+to_atom(A) when is_atom(A) ->
+    A;
 to_atom(X) ->
     error({bad_type, X}).
 

@@ -173,7 +173,9 @@ info(XSocket, Command, Options) ->
 %%% @end
 
 call(XSocket, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun), 
-				  is_list(Args) ->
+				   is_list(Args);
+				   is_binary(Mod), is_binary(Fun),
+				   is_list(Args)->
     Req = {call,Mod,Fun,Args},
     if is_pid(XSocket) ->
 	    {reply, gen_server:call(XSocket, {call, Req}), []};
@@ -188,7 +190,9 @@ call(XSocket, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun),
 %%% @end
 
 cast(XSocket, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun), 
-				  is_list(Args) ->
+				   is_list(Args);
+				   is_binary(Mod), is_binary(Fun),
+				   is_list(Args) ->
     Req = {cast,Mod,Fun,Args},
     if is_pid(XSocket) ->
 	    case gen_server:call(XSocket, {cast, Req}) of
