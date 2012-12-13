@@ -48,10 +48,11 @@ childspec({Name, Opts}) ->
 
 get_servers() ->
     %% If 'setup' is available, query for session settings
+    SetupMod = setup,
     OtherServers =
-	case lists:keymember(setup, 1, application:loaded_applications()) of
+	case lists:keymember(SetupMod, 1, application:loaded_applications()) of
 	    true ->
-		[S || {_, S} <- setup:find_env_vars(bert_servers)];
+		[S || {_, S} <- SetupMod:find_env_vars(bert_servers)];
 	    false ->
 		[]
 	end,
