@@ -444,21 +444,28 @@ access_test(M,F,A, Access,Check) ->
 	    end
     end.
 
-check_list([{accept, M}|_], M, F, A) ->  {{M, F, A}, keep};
-check_list([{accept, M, F, A}|_], M, F, A) -> {{M, F, A}, keep};
-check_list([{reject, M}|_], M, _, _) -> false;
-check_list([{reject, M, F, A}|_], M, F, A) -> false;
-check_list([{propargs,M,F,Args}|_], M, F, 1) ->
+check_list(Access=[_Check|_], M, F, A) ->
+    ?debug("check_list: ~p [~p,~p,~p]", [_Check, M, F, A]),
+    check_list_(Access, M, F, A);
+check_list([], _M,_F,_A) ->
+    false.
+
+
+check_list_([{accept, M}|_], M, F, A) ->  {{M, F, A}, keep};
+check_list_([{accept, M, F, A}|_], M, F, A) -> {{M, F, A}, keep};
+check_list_([{reject, M}|_], M, _, _) -> false;
+check_list_([{reject, M, F, A}|_], M, F, A) -> false;
+check_list_([{propargs,M,F,Args}|_], M, F, 1) ->
     NewA = length(Args),
     {{M, F, NewA}, Args};
-check_list([{verify, {Mv,Fv}}|T], M, F, A) ->
+check_list_([{verify, {Mv,Fv}}|T], M, F, A) ->
     case Mv:Fv(M, F, A) of
 	continue -> check_list(T, M, F, A);
 	{_,_,_} = MFA1 -> {MFA1, keep};
 	{{_,_,_}, Conv} = Reply when is_list(Conv); Conv==keep -> Reply;
 	false -> false
     end;
-check_list([{redirect, [_|_] = Ms}|T], M, F, A) ->
+check_list_([{redirect, [_|_] = Ms}|T], M, F, A) ->
     case lists:keyfind(M, 1, Ms) of
 	{M, M1} ->
 	    check_list(T, M1, F, A);
@@ -470,10 +477,10 @@ check_list([{redirect, [_|_] = Ms}|T], M, F, A) ->
 		    {MFA1, keep}
 	    end
     end;
-check_list([M|_], M, F, A)             -> {{M, F, A}, keep};
-check_list([{M,F,A} = MFA|_], M, F, A) -> {MFA, keep};
-check_list([_|T], M, F, A)             -> check_list(T, M, F, A);
-check_list([], _, _, _)                -> false.
+check_list_([M|_], M, F, A)             -> {{M, F, A}, keep};
+check_list_([{M,F,A} = MFA|_], M, F, A) -> {MFA, keep};
+check_list_([_|T], M, F, A)             -> check_list(T, M, F, A);
+check_list_([], _, _, _)                -> false.
 
 
 access_check(M,F,A, Conv, false) ->
