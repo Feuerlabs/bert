@@ -444,6 +444,7 @@ access_test(M,F,A, Access) ->
     access_test(M,F,A, Access, true).
 
 access_test(M,F,A, Access,Check) ->
+    ?dbg("access_test(~p,~p,~p,~p,~p)~n", [M,F,A,Access,Check]),
     if Access =:= [] ->  %% full access!!!
 	    access_check(M,F,A,keep,Check);
        true ->
@@ -451,7 +452,8 @@ access_test(M,F,A, Access,Check) ->
 		false ->
 		    {error, ?SERV_ERR_NO_SUCH_FUNCTION,
 		     <<"access denied">>};
-		{{M1, F1, A1}, Conv} ->
+		{{M1, F1, A1}, Conv} = Res ->
+		    ?dbg("check_list() -> ~p~n", [Res]),
 		    access_check(M1, F1, A1, Conv, Check)
 	    end
     end.
