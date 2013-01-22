@@ -178,7 +178,7 @@ call(XSocket, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun),
 				   is_list(Args)->
     Req = {call,Mod,Fun,Args},
     if is_pid(XSocket) ->
-	    {reply, gen_server:call(XSocket, {call, Req}), []};
+	    {reply, gen_server:call(XSocket, {call, Req}, infinity), []};
        true ->
 	    B = bert:to_binary(Req),
 	    exo_socket:send(XSocket, B),
