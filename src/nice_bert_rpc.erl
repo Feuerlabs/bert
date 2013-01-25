@@ -23,7 +23,7 @@
 -export([callback_host/5, callback_host/6, callback_host/8]).
 -export([call/4, cast/4, info/3]).
 -export([open/0, open/1, open/2, open/4]).
--export([close/1, read_chunk/1]).
+-export([disconnect/3, close/1, read_chunk/1]).
 
 -type call_result() :: 
 	{reply,Result::term(),CacheInfo::cache_info()} |
@@ -274,6 +274,15 @@ open(IP, Port, Protos, Timeout) ->
 %%% @doc
 %%%    Close a transport connection
 %%% @end
+
+disconnect(Host, Port, Protos) ->
+    case bert_rpc_exec:get_session(Host, Port, Protos, [{auto_connect, false}],
+				   ?CONNECT_TIMEOUT) of
+	{error, no_connection} ->
+	    ok;
+	{ok, Pid} ->
+	    gen_server:call(Pid, close)
+    end.
 
 close(XSocket) ->
     exo_socket:close(XSocket).

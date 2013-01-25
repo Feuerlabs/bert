@@ -169,7 +169,11 @@ init(Socket, Options) ->
     {ok,{IP,Port}} = exo_socket:peername(Socket),
     ?dbg("bert_rpc_exec: connection from: ~p : ~p\n", [IP, Port]),
     Access = proplists:get_value(access, Options, []),
-    {ok, #state{ access=Access}}.
+    State = #state{ access = Access },
+    case proplists:get_value(idle_timeout, Options) of
+	undefined -> {ok, State};
+	T when is_integer(T) -> {ok, State, T}
+    end.
 
 data(Socket, Data, State) ->
     try bert:to_term(Data) of
@@ -328,6 +332,9 @@ handle_request(Socket, Request, State) ->
 
 	{error,_} = Error ->
 	    {reply, Error, State};
+
+	close ->
+	    {stop, closed, State};
 
 	_Other ->
 	    send_server_error(Socket, ?SERV_ERR_UNDESIGNATED,
