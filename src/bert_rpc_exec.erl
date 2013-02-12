@@ -77,9 +77,19 @@ do_start(Port, Options, ExoOptions, StartF) when StartF==start;
 	_ ->
 	    exo_socket_server:StartF(Port,[tcp],
 				     [{active,once},{packet,4},binary,
-				      {reuseaddr,true} | ExoOptions],
+				      {reuseaddr,true} |
+				      send_timeout_opt(ExoOptions)],
 				     ?MODULE, Options)
     end.
+
+send_timeout_opt(Opts) ->
+    Opts1 = case lists:keymember(send_timeout, 1, Opts) of
+		true ->
+		    [{send_timeout, 30}|Opts];
+		false ->
+		    Opts
+	    end,
+    lists:keystore(send_timeout_close, 1, Opts1, {send_timeout_close, true}).
 
 start_link(Options) ->
     case lists:keyfind(port, 1, Options) of

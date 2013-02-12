@@ -265,11 +265,41 @@ open(Host) ->
 open(IP, Port) ->
     open(IP, Port, [tcp], ?CONNECT_TIMEOUT).
 
-open(IP, Port, Protos, Timeout) ->
+open(IP, Port, Protos0, Timeout) ->
     AuthOptions = bert_rpc:auth_options(),
-    SSLOptions = [{verify, verify_none}],
-    Opts = [binary, {packet,4}, {active,once}] ++ SSLOptions ++ AuthOptions,
+    {Protos, TCPOptions, SSLOptions} = proto_options(Protos0),
+    Opts = [binary, {packet,4}, {active,once}, {send_timeout, 30},
+	    {send_timeout_close, true}] ++
+	TCPOptions ++ SSLOptions ++ AuthOptions,
     bert_rpc_exec:get_session(IP, Port, Protos, Opts, Timeout).
+
+proto_options(Protos) ->
+    proto_options(Protos, [], [], []).
+
+proto_options([tcp|Protos], Ps, [], SSL) ->
+    proto_options(Protos, [tcp|Ps], tcp_options(), SSL);
+proto_options([ssl|Protos], Ps, TCP, []) ->
+    proto_options(Protos, [ssl|Ps], TCP, ssl_options());
+proto_options([{tcp, Opts}|Protos], Ps, [], SSL) ->
+    proto_options(Protos, [tcp|Ps], merge_opts(Opts, tcp_options()), SSL);
+proto_options([{ssl, Opts}|Protos], Ps, TCP, []) ->
+    proto_options(Protos, [ssl|Ps], TCP, merge_opts(Opts, ssl_options()));
+proto_options([], Ps, TCP, SSL) ->
+    {Ps, TCP, SSL}.
+
+tcp_options() ->
+    [].
+
+ssl_options() ->
+    [{verify, verify_none}].
+
+merge_opts([H|T], Acc) when is_tuple(H) ->
+    merge_opts(T, lists:keystore(element(1,H), 1, Acc, H));
+merge_opts([H|T], Acc) when is_atom(H) ->
+    merge_opts(T, [H|Acc -- [H]]);
+merge_opts([], Acc) ->
+    Acc.
+
 %%%
 %%% @doc
 %%%    Close a transport connection
