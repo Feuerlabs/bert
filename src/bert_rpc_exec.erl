@@ -258,8 +258,10 @@ handle_request(Socket, Request, State) ->
 		    ?dbg("access_test() -> ~p~n", [_AccessRes]),
 		    %% handle security  + stream input ! + stream output
 		    NewArgs = convert_args(Conv, Arguments),
+		    ?dbg("apply_f: ~s:~s args=~p\n", [M,F,NewArgs]),
 		    try apply_f(M, F, NewArgs) of
 			Result ->
+			    ?dbg("result: ~p\n", [Result]),
 			    B = {reply,Result},
 			    try bert:to_binary(B) of
 				Bin ->
@@ -269,6 +271,7 @@ handle_request(Socket, Request, State) ->
 				error:Error ->
 				    Trace = erlang:get_stacktrace(),
 				    Detail = list_to_binary(io_lib:format("~p",[Error])),
+				    ?dbg("error: ~s ~p\n", [Detail,Trace]),
 				    send_server_error(Socket, 2, Detail, Trace),
 				    {ok,reset_state(State)}
 			    end
@@ -344,6 +347,8 @@ convert_args([H|T], Opts) when is_atom(H) ->
 	{_, V} -> [V | convert_args(T, Opts)];
 	false  -> error({missing_argument, H})
     end;
+convert_args([{args,Args}|T], [Opts|Opts1]) ->
+    convert_args(Args, Opts) ++ convert_args(T, Opts1);
 convert_args([{opt,K,Default}|T], Opts) ->
     [proplists:get_value(K, Opts, Default) | convert_args(T, Opts)];
 convert_args([{TypeConv, K}|T], Opts) ->
@@ -363,13 +368,18 @@ convert_type(TypeConv, V) ->
     case TypeConv of
 	string_to_integer -> to_integer(V);
 	string_to_float   ->
-	    case erl_scan:string(V) of
+	    case erl_scan:string(to_list(V)) of
 		{ok, [{float, _, F}], _} -> F;
 		_ -> error({bad_type, V})
 	    end;
 	string_to_atom -> to_atom(V);
 	_ -> error({bad_type_converter, TypeConv})
     end.
+
+to_list(B) when is_binary(B) ->
+    binary_to_list(B);
+to_list(L) when is_list(L) ->
+    L.
 
 to_integer(B) when is_binary(B) ->
     list_to_integer(binary_to_list(B));
@@ -485,8 +495,9 @@ check_list_([{redirect, [_|_] = Ms}|T], M, F, A) ->
 	    case lists:keyfind({M,F,A}, 1, Ms) of
 		false ->
 		    check_list(T, M, F, A);
-		{_, {_,_,_} = MFA1} ->
-		    {MFA1, keep}
+		{_, {M1,F1,A1} = _MFA1} ->
+		    check_list(T,M1,F1,A1)
+		     %% {MFA1, keep}
 	    end
     end;
 check_list_([M|_], M, F, A)             -> {{M, F, A}, keep};

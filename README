@@ -1,0 +1,29 @@
+
+Bert RPC access and argument conversion
+=======================================
+
+Bert manage MFA access list.
+
+{accept, Mod}
+{accept, Mod, Func, Arity}
+
+{reject, Mod}
+{reject, Mod, Func, Arity}
+
+{redirect, [ {M, M'} | {{M,F,A},{M',F',A'}} ]}
+
+Mod == {accept, Mod}
+{M,F,A} == {accept,M,F,A}
+
+{propargs,Mod,Func,ArgSpec} 
+  ArgSpec = keep | [Arg | ArgSpec]
+
+  Arg = Name::atom() 
+      | {args,ArgSpec}  -- get nested arguments
+      | {opt,Name::atom(),Default::term()}
+      | {Convert, Name::atom()}
+      | {Convert, Name::atom(), Default::term()}
+
+  Type = string_to_integer |
+       | string_to_float |
+       | string_to_atom
