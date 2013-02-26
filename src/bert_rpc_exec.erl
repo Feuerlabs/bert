@@ -77,9 +77,19 @@ do_start(Port, Options, ExoOptions, StartF) when StartF==start;
 	_ ->
 	    exo_socket_server:StartF(Port,[tcp],
 				     [{active,once},{packet,4},binary,
-				      {reuseaddr,true} | ExoOptions],
+				      {reuseaddr,true} |
+				      send_timeout_opt(ExoOptions)],
 				     ?MODULE, Options)
     end.
+
+send_timeout_opt(Opts) ->
+    Opts1 = case lists:keymember(send_timeout, 1, Opts) of
+		true ->
+		    [{send_timeout, 30}|Opts];
+		false ->
+		    Opts
+	    end,
+    lists:keystore(send_timeout_close, 1, Opts1, {send_timeout_close, true}).
 
 start_link(Options) ->
     case lists:keyfind(port, 1, Options) of
@@ -169,7 +179,11 @@ init(Socket, Options) ->
     {ok,{IP,Port}} = exo_socket:peername(Socket),
     ?dbg("bert_rpc_exec: connection from: ~p : ~p\n", [IP, Port]),
     Access = proplists:get_value(access, Options, []),
-    {ok, #state{ access=Access}}.
+    State = #state{ access = Access },
+    case proplists:get_value(idle_timeout, Options) of
+	undefined -> {ok, State};
+	T when is_integer(T) -> {ok, State, T}
+    end.
 
 data(Socket, Data, State) ->
     try bert:to_term(Data) of
@@ -332,6 +346,9 @@ handle_request(Socket, Request, State) ->
 	{error,_} = Error ->
 	    {reply, Error, State};
 
+	close ->
+	    {stop, closed, State};
+
 	_Other ->
 	    send_server_error(Socket, ?SERV_ERR_UNDESIGNATED,
 			      <<"protocol error">>, []),
@@ -454,6 +471,7 @@ access_test(M,F,A, Access) ->
     access_test(M,F,A, Access, true).
 
 access_test(M,F,A, Access,Check) ->
+    ?dbg("access_test(~p,~p,~p,~p,~p)~n", [M,F,A,Access,Check]),
     if Access =:= [] ->  %% full access!!!
 	    access_check(M,F,A,keep,Check);
        true ->
@@ -461,7 +479,8 @@ access_test(M,F,A, Access,Check) ->
 		false ->
 		    {error, ?SERV_ERR_NO_SUCH_FUNCTION,
 		     <<"access denied">>};
-		{{M1, F1, A1}, Conv} ->
+		{{M1, F1, A1}, Conv} = Res ->
+		    ?dbg("check_list() -> ~p~n", [Res]),
 		    access_check(M1, F1, A1, Conv, Check)
 	    end
     end.

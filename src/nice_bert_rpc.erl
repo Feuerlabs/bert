@@ -23,7 +23,7 @@
 -export([callback_host/5, callback_host/6, callback_host/8]).
 -export([call/4, cast/4, info/3]).
 -export([open/0, open/1, open/2, open/4]).
--export([close/1, read_chunk/1]).
+-export([disconnect/3, close/1, read_chunk/1]).
 
 -type call_result() :: 
 	{reply,Result::term(),CacheInfo::cache_info()} |
@@ -178,7 +178,7 @@ call(XSocket, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun),
 				   is_list(Args)->
     Req = {call,Mod,Fun,Args},
     if is_pid(XSocket) ->
-	    {reply, gen_server:call(XSocket, {call, Req}), []};
+	    {reply, gen_server:call(XSocket, {call, Req}, infinity), []};
        true ->
 	    B = bert:to_binary(Req),
 	    exo_socket:send(XSocket, B),
@@ -265,15 +265,54 @@ open(Host) ->
 open(IP, Port) ->
     open(IP, Port, [tcp], ?CONNECT_TIMEOUT).
 
-open(IP, Port, Protos, Timeout) ->
+open(IP, Port, Protos0, Timeout) ->
     AuthOptions = bert_rpc:auth_options(),
-    SSLOptions = [{verify, verify_none}],
-    Opts = [binary, {packet,4}, {active,once}] ++ SSLOptions ++ AuthOptions,
+    {Protos, TCPOptions, SSLOptions} = proto_options(Protos0),
+    Opts = [binary, {packet,4}, {active,once}, {send_timeout, 30},
+	    {send_timeout_close, true}] ++
+	TCPOptions ++ SSLOptions ++ AuthOptions,
     bert_rpc_exec:get_session(IP, Port, Protos, Opts, Timeout).
+
+proto_options(Protos) ->
+    proto_options(Protos, [], [], []).
+
+proto_options([tcp|Protos], Ps, [], SSL) ->
+    proto_options(Protos, [tcp|Ps], tcp_options(), SSL);
+proto_options([ssl|Protos], Ps, TCP, []) ->
+    proto_options(Protos, [ssl|Ps], TCP, ssl_options());
+proto_options([{tcp, Opts}|Protos], Ps, [], SSL) ->
+    proto_options(Protos, [tcp|Ps], merge_opts(Opts, tcp_options()), SSL);
+proto_options([{ssl, Opts}|Protos], Ps, TCP, []) ->
+    proto_options(Protos, [ssl|Ps], TCP, merge_opts(Opts, ssl_options()));
+proto_options([], Ps, TCP, SSL) ->
+    {Ps, TCP, SSL}.
+
+tcp_options() ->
+    [].
+
+ssl_options() ->
+    [{verify, verify_none}].
+
+merge_opts([H|T], Acc) when is_tuple(H) ->
+    merge_opts(T, lists:keystore(element(1,H), 1, Acc, H));
+merge_opts([H|T], Acc) when is_atom(H) ->
+    merge_opts(T, [H|Acc -- [H]]);
+merge_opts([], Acc) ->
+    Acc.
+
 %%%
 %%% @doc
 %%%    Close a transport connection
 %%% @end
+
+disconnect(Host, Port, Protos) ->
+    case bert_rpc_exec:get_session(Host, Port, Protos, [{auto_connect, false}],
+				   ?CONNECT_TIMEOUT) of
+	{error, no_connection} ->
+	    ok;
+	{ok, Pid} ->
+	    gen_server:call(Pid, close)
+    end.
 
 close(XSocket) ->
     exo_socket:close(XSocket).
