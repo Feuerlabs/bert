@@ -175,20 +175,30 @@ recv_challenge(<<Chal:32/little, Tok:4/binary, P/binary>>,
 		    {<<MyChal:32/little, Tok1/binary, MyId/binary>>,
 		     S0#st{mine = M#data{key = MyKey}, theirs = T2}};
 		false ->
+		    case check_token_(Tok, P, Chal, MyKey) of
+			true ->
+			    ?error("~p: Keys switched !!!", [?MODULE]);
+			false ->
+			    ?debug("~p: Wrong key !!!", [?MODULE])
+		    end,
 		    error
 	    end
     end.
 
 %% If on server side, we may need to fetch the key pair.
 keys(ID, #st{theirs = #data{key = {M, F}}}) ->
+    ?debug("~p: keys id ~p, their mf ~p:~p~n", [?MODULE, ID, M, F]),
     case M:F(ID) of
 	{_MyKey, _TheirKey} = Res ->
+	    ?debug("~p: keys result ~p~n", [?MODULE, Res]),
 	    Res;
 	error ->
-	    error
+	    ?debug("~p: keys error~n", [?MODULE]),
+    	    error
     end;
 keys(_, #st{theirs = #data{key = Kt}, mine = #data{key = Km}}) when
       is_binary(Kt), is_binary(Km) ->
+    ?debug("~p: keys their ~p, mine ~p~n", [?MODULE, Kt, Km]),
     {Km, Kt}.
 
 
@@ -209,13 +219,18 @@ rand_token(Chal, Key) ->
 make_token_(P, Chal, Key) ->
     <<_:16/binary,Token:4/binary>> =
 	crypto:sha(<<Key/binary, Chal:32/little, P/binary>>),
+    ?debug("~p: make_token(~p, ~p, ~p) -> ~p~n", 
+	   [?MODULE, P, Chal, Key, Token]),
     Token.
 
 check_token_(Tok, P, Chal, Key) ->
+    ?debug("~p: check_token(~p, ~p, ~p, ~p)~n", [?MODULE, Tok, P, Chal, Key]),
     case crypto:sha(<<Key/binary, Chal:32/little, P/binary>>) of
 	<<_:16/binary, Tok:4/binary>> ->
+	    ?debug("~p: check_token true (~p)~n", [?MODULE, Tok]),
 	    true;
-	_ ->
+	<<_:16/binary, WrongTok:4/binary>> ->
+	    ?debug("~p: check_token false(~p)~n", [?MODULE, WrongTok]),
 	    false
     end.
 
