@@ -510,7 +510,7 @@ check_list_([{redirect, [_|_] = Ms}|T], M, F, A) ->
     case lists:keyfind(M, 1, Ms) of
 	{M, M1} ->
 	    check_list(T, M1, F, A);
-	false ->
+	_ ->
 	    case lists:keyfind({M,F,A}, 1, Ms) of
 		false ->
 		    check_list(T, M, F, A);

@@ -85,6 +85,7 @@ send_first_challenge(Socket, St) ->
 await_first_challenge(Socket, St) ->
     ?debug("await_first_challenge~n", []),
     Data = recv(Socket),
+    ?debug("await_first_challenge: data = ~p.", [Data]),
     case recv_challenge(Data, St) of
 	error ->
 	    ?debug("auth error~n", []),
@@ -99,6 +100,7 @@ await_first_challenge(Socket, St) ->
 await_response(Socket, St) ->
     ?debug("await_response~n", []),
     Data = recv(Socket),
+   ?debug("await_response: data ~p~n", [Data]),
     case recv_challenge(Data, St) of
 	error ->
 	    ?debug("auth error~n", []),
@@ -177,9 +179,9 @@ recv_challenge(<<Chal:32/little, Tok:4/binary, P/binary>>,
 		false ->
 		    case check_token_(Tok, P, Chal, MyKey) of
 			true ->
-			    ?error("~p: Keys switched !!!", [?MODULE]);
+			    lager:warning("Keys switched !!!", []);
 			false ->
-			    ?debug("~p: Wrong key !!!", [?MODULE])
+			    ?debug("Wrong key !!!", [])
 		    end,
 		    error
 	    end
@@ -187,18 +189,18 @@ recv_challenge(<<Chal:32/little, Tok:4/binary, P/binary>>,
 
 %% If on server side, we may need to fetch the key pair.
 keys(ID, #st{theirs = #data{key = {M, F}}}) ->
-    ?debug("~p: keys id ~p, their mf ~p:~p~n", [?MODULE, ID, M, F]),
+    ?debug("keys: id ~p, their mf ~p:~p~n", [ID, M, F]),
     case M:F(ID) of
 	{_MyKey, _TheirKey} = Res ->
-	    ?debug("~p: keys result ~p~n", [?MODULE, Res]),
+	    ?debug("keys: result ~p~n", [Res]),
 	    Res;
 	error ->
-	    ?debug("~p: keys error~n", [?MODULE]),
+	    ?debug("keys: error~n", []),
     	    error
     end;
 keys(_, #st{theirs = #data{key = Kt}, mine = #data{key = Km}}) when
       is_binary(Kt), is_binary(Km) ->
-    ?debug("~p: keys their ~p, mine ~p~n", [?MODULE, Kt, Km]),
+    ?debug("~p: keys their ~p, mine ~p~n", [Kt, Km]),
     {Km, Kt}.
 
 
@@ -224,13 +226,13 @@ make_token_(P, Chal, Key) ->
     Token.
 
 check_token_(Tok, P, Chal, Key) ->
-    ?debug("~p: check_token(~p, ~p, ~p, ~p)~n", [?MODULE, Tok, P, Chal, Key]),
+    ?debug("check_token(~p, ~p, ~p, ~p)~n", [Tok, P, Chal, Key]),
     case crypto:sha(<<Key/binary, Chal:32/little, P/binary>>) of
 	<<_:16/binary, Tok:4/binary>> ->
-	    ?debug("~p: check_token true (~p)~n", [?MODULE, Tok]),
+	    ?debug("check_token: true (~p)~n", [Tok]),
 	    true;
 	<<_:16/binary, WrongTok:4/binary>> ->
-	    ?debug("~p: check_token false(~p)~n", [?MODULE, WrongTok]),
+	    ?debug("check_token: false(~p)~n", [ WrongTok]),
 	    false
     end.
 

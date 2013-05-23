@@ -25,6 +25,8 @@
 -export([open/0, open/1, open/2, open/4]).
 -export([disconnect/3, close/1, read_chunk/1]).
 
+-include_lib("lager/include/log.hrl").
+
 -type call_result() :: 
 	{reply,Result::term(),CacheInfo::cache_info()} |
 	{stream,Socket::socket(),CacheInfo::cache_info()} |
@@ -177,10 +179,13 @@ call(XSocket, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun),
 				   is_binary(Mod), is_binary(Fun),
 				   is_list(Args)->
     Req = {call,Mod,Fun,Args},
+    ?debug("call: sending ~p.", [Req]), 
     if is_pid(XSocket) ->
+	    ?debug("call: sending ~p with gen_server:call", [Req]), 
 	    {reply, gen_server:call(XSocket, {call, Req}, infinity), []};
        true ->
 	    B = bert:to_binary(Req),
+	    ?debug("call: sending ~p thru socket", [B]), 
 	    exo_socket:send(XSocket, B),
 	    handle_result(XSocket, false, [])
     end.
