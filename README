@@ -24,6 +24,6 @@ Mod == {accept, Mod}
       | {Convert, Name::atom()}
       | {Convert, Name::atom(), Default::term()}
 
-  Type = string_to_integer |
+  Convert = string_to_integer |
        | string_to_float |
        | string_to_atom
