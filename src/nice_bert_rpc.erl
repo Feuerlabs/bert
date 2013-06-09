@@ -181,8 +181,9 @@ call(XSocket, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun),
     Req = {call,Mod,Fun,Args},
     ?debug("call: sending ~p.", [Req]), 
     if is_pid(XSocket) ->
-	    ?debug("call: sending ~p with gen_server:call", [Req]), 
-	    {reply, gen_server:call(XSocket, {call, Req}, infinity), []};
+	    ?debug("call: sending ~p with gen_server:call to ~p", 
+		   [Req, XSocket]), 
+	    {reply, gen_server:call(XSocket, Req, infinity), []};
        true ->
 	    B = bert:to_binary(Req),
 	    ?debug("call: sending ~p thru socket", [B]), 
@@ -200,7 +201,7 @@ cast(XSocket, Mod, Fun, Args) when is_atom(Mod), is_atom(Fun),
 				   is_list(Args) ->
     Req = {cast,Mod,Fun,Args},
     if is_pid(XSocket) ->
-	    case gen_server:call(XSocket, {cast, Req}) of
+	    case gen_server:call(XSocket, Req) of
 		{noreply} -> noreply;
 		Other -> Other
 	    end;

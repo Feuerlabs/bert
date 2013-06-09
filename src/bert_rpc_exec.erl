@@ -20,7 +20,10 @@
 -include("bert.hrl").
 -include_lib("lager/include/log.hrl").
 
--define(dbg(F,A), ?debug("~p " ++ F, [self()|A])).
+-define(SERVER, ?MODULE).
+
+-define(dbg(F,A), ?debug("~p:~p: " ++ F, [?MODULE, self()|A])).
+
 %%
 %% FIXME:
 %%  support for ssl transport
@@ -46,17 +49,27 @@
 	  remote_access = [] :: [access_element()]
 	}).
 
--export([init/2, data/3, close/2, error/3]).
+%% exo_socket_server callbacks
+-export([init/2, 
+	 data/3, 
+	 close/2, 
+	 error/3,
+	 control/4]).
 
+%% api
 -export([start_link/1]).
 -export([start/0, start/2, start/3]).
 -export([start_ssl/0, start_ssl/2, start_ssl/3]).
 -export([get_session/5]).
--export([reuse_init/2, reuse_options/4,
-	 received_reuse_info/2, handle_call/3]).
+-export([reuse_init/2, 
+	 reuse_options/4,
+	 received_reuse_info/2]).
+-export([request/2]). %% Used by exoport_gsms
 
-%%-define(dbg(F,A), io:format((F),(A))).
 
+%%%===================================================================
+%%% API
+%%%===================================================================
 start() ->
     start(?BERT_PORT,[]).
 
@@ -65,31 +78,6 @@ start(Port, Options) ->
 
 start(Port, Options, ExoOptions) ->
     do_start(Port, Options, ExoOptions, start).
-
-start_link(Port, Options, ExoOptions) ->
-    do_start(Port, Options, ExoOptions, start_link).
-
-do_start(Port, Options, ExoOptions, StartF) when StartF==start;
-						 StartF==start_link ->
-    case lists:keymember(ssl, 1, Options) of
-	{_, true} ->
-	    start_ssl(Port, Options, ExoOptions);
-	_ ->
-	    exo_socket_server:StartF(Port,[tcp],
-				     [{active,once},{packet,4},binary,
-				      {reuseaddr,true} |
-				      send_timeout_opt(ExoOptions)],
-				     ?MODULE, Options)
-    end.
-
-send_timeout_opt(Opts) ->
-    Opts1 = case lists:keymember(send_timeout, 1, Opts) of
-		true ->
-		    [{send_timeout, 30}|Opts];
-		false ->
-		    Opts
-	    end,
-    lists:keystore(send_timeout_close, 1, Opts1, {send_timeout_close, true}).
 
 start_link(Options) ->
     case lists:keyfind(port, 1, Options) of
@@ -114,22 +102,45 @@ start_ssl(Port, Options) ->
 start_ssl(Port, Options, ExoOptions) ->
     do_start_ssl(Port, Options, ExoOptions, start).
 
-start_link_ssl(Port, Options, ExoOptions) ->
-    do_start_ssl(Port, Options, ExoOptions, start_link).
+%%--------------------------------------------------------------------
+%% @doc
+%% Sends 
+%% @end
+%%--------------------------------------------------------------------
+-spec request(Request::term(), ReplyMethod::internal | external) ->
+		     ok  | {error, Reason::term()}.
+								       
+request({C, _Mod, _Fun, _Args} = Request, external) 
+when C == call;
+     C == cast ->
+    ?dbg("control: request ~p\n", [Request]),
+    {ok, Access} = exoport:access(),
+    case handle_call_and_cast(Request, Access) of
+	{send, Result} ->
+	    Result;
+	{cast, {M, F, A}} ->
+	    spawn(M, F, A),
+	    ok;
+	{error, {_Code, _Detail, _Trace}} = E ->
+	    E;
+	_Other ->
+	    ?error("Unexpected result ~p of handle_call_and_cast(~p, ~p)",
+		   [_Other, Request, Access])
+    end;
+    
+request(Request, internal) ->
+    case exo_socket_server:reusable_sessions(bert_rpc_exec) of
+	[{{Host, Port}, Pid} | _Rest] ->
+	    %% Send request to first available socket session
+	    ?dbg("request: calling ~p:~p(~p) with ~p.", 
+		 [Host, Port, Pid, Request]),
+	    gen_server:call(Pid, {request, Request});
+	_ ->
+	    ?dbg("request: no connection.",  []),
+	    {error, no_connection}
+    end.
 
-do_start_ssl(Port, Options, ExoOptions, StartF) when
-      StartF == start; StartF == start_link ->
-    Dir = code:priv_dir(bert),
-    exo_socket_server:StartF(Port,[tcp,probe_ssl],
-			     [{active,once},{packet,4},binary,
-			      {debug, true},
-			      {verify, verify_none}, %% no client cert required
-			      %% server demo - cert
-			      {keyfile, filename:join(Dir, "host.key")},
-			      {certfile, filename:join(Dir, "host.cert")},
-			      {reuseaddr,true} | ExoOptions], ?MODULE, Options).
-
-
+%%--------------------------------------------------------------------
 get_session(IP, Port, Protos, Opts, Timeout) ->
     case whereis(?MODULE) of
 	undefined ->
@@ -146,18 +157,12 @@ get_session(IP, Port, Protos, Opts, Timeout) ->
 	    end
     end.
 
-maybe_connect(IP, Port, Protos, Opts, Timeout) ->
-    case proplists:get_value(auto_connect, Opts, true) of
-	true ->
-	    exo_socket:connect(IP, Port, Protos, Opts, Timeout);
-	false ->
-	    {error, no_connection}
-    end.
-
+%%--------------------------------------------------------------------
 reuse_init(_, _) ->
     register(?MODULE, self()),
     {ok, []}.
 
+%%--------------------------------------------------------------------
 reuse_options(_Host, _Port, Args, _St) ->
     ?debug("reuse_options(Args = ~p)~n", [Args]),
     case proplists:get_value(access, Args, []) of
@@ -167,6 +172,7 @@ reuse_options(_Host, _Port, Args, _St) ->
 	    [{bert_enc, access, Access}]
     end.
 
+%%--------------------------------------------------------------------
 received_reuse_info(Info, State) ->
     case lists:keyfind(access, 1, Info) of
 	{_, Access} ->
@@ -175,20 +181,24 @@ received_reuse_info(Info, State) ->
 	    {ok, State}
     end.
 
+%%%===================================================================
+%%% exo_socket_server callbacks
+%%%===================================================================
+%%--------------------------------------------------------------------
 init(Socket, Options) ->
     {ok,{IP,Port}} = exo_socket:peername(Socket),
-    ?dbg("bert_rpc_exec: connection from: ~p : ~p\n", [IP, Port]),
+    ?dbg("init: connection from: ~p : ~p\n", [IP, Port]),
     Access = proplists:get_value(access, Options, []),
-    State = #state{ access = Access },
+    State = #state{access = Access},
     case proplists:get_value(idle_timeout, Options) of
 	undefined -> {ok, State};
 	T when is_integer(T) -> {ok, State, T}
     end.
 
-data(Socket, Data, State) ->
+data(Socket, Data, State) when is_binary(Data) ->
     try bert:to_term(Data) of
 	Request ->
-	    ?dbg("bert_rpc_exec: request: ~w\n", [Request]),
+	    ?dbg("data: request: ~w\n", [Request]),
 	    handle_request(Socket, Request, State)
     catch
 	error:_Error ->
@@ -199,164 +209,204 @@ data(Socket, Data, State) ->
 			[]}},
 	    exo_socket:send(Socket, bert:to_binary(B)),
 	    {ok,State}
-    end.
+    end;
+data(Socket, Request, State) ->
+    %% Already converted to bert format
+    ?dbg("data: request: ~w\n", [Request]),
+    handle_request(Socket, Request, State).
 
-handle_call(_, get_access, #state{access = A} = State) ->
+
+%%--------------------------------------------------------------------
+%% @doc
+%%
+%% Calls relayed from exo_socket_session:handle_call/3.
+%% @end
+%%--------------------------------------------------------------------
+-spec control(Socket::term(), 
+	      Request::term(), 
+	      From::term(), 
+	      State::#state{}) ->
+		     {reply, Reply::term(),State::#state{}} |
+		     {noreply, State::#state{}} |
+		     {ignore, State::#state{}} |
+		     {data, Data::term(), State::#state{}} | 
+		     {send, Bin::binary(), State::#state{}} |
+		     {stop, Reason::term(),State::#state{}}.
+
+control(_Socket, {request, Request} = Call, _From, State) ->
+    ?dbg("control: call ~p\n", [Call]),
+    %% Transfer to data callback for reply on socket
+    {data, Request, State};
+
+control(_Socket, get_access, _From, #state{access = A} = State) ->
     {reply, A, State};
-handle_call(_, {set_access, A}, State) ->
+control(_Socket, {set_access,  A}, _From, State) ->
     %% should perhaps check that it's a valid access list... FIXME
     {reply, ok, State#state{access = A}};
-handle_call(C, {C, _M,_F,_A} = Req, #state{} = St) ->
-    ?dbg("handle_call(~p)~n", [Req]),
+control(_Socket, {C, _M,_F,_A} = Req, _From, #state{} = St) 
+  when C == call;
+       C == cast ->
+    ?dbg("control(~p)~n", [Req]),
     {send, bert:to_binary(Req), St}.
 
-
-%% handle_call(C, {C, M,F,A} = Req, #state{remote_access = Access} = St) ->
-%%     ?dbg("handle_call(~p, Access=~p)~n", [Req, Access]),
-%%     if Access == [] ->
-%% 	    {send, bert:to_binary(Req), St};
-%%        true ->
-%% 	    case access_test(M,F,length(A), Access, false) of
-%% 		{ok, {_M1,_F1,_A1}, _Conv} ->
-%% 		    %% We now know that there is a pattern. Let the remote side
-%% 		    %% do the conversion.
-%% 		    {send, bert:to_binary(Req), St};
-%% 			     %% {C, M1,F1, convert_args(Conv,A)}),St};
-%% 		{error,ServerCode,Detail} ->
-%% 		    Msg = server_error_msg(ServerCode, Detail, []),
-%% 		    if C==call ->
-%% 			    {reply, Msg, St};
-%% 		       C==cast ->
-%% 			    {ignore, St}
-%% 		    end
-%% 	    end
-%%     end.
-
-
+%%--------------------------------------------------------------------
+%% @doc
 %%
 %% close - retrive statistics
 %% transport socket SHOULD still be open, but ssl may not handle this!
 %%
+%% @end
+%%--------------------------------------------------------------------
 close(Socket, State) ->
     case exo_socket:getstat(Socket, exo_socket:stats()) of
 	{ok,_Stats} ->
-	    ?dbg("bert_rpc_exec: close, stats=~w\n", [_Stats]),
+	    ?dbg("close: stats=~w\n", [_Stats]),
 	    {ok, State};
 	{error,_Reason} ->
-	    ?dbg("bert_rpc_exec: close, stats error=~w\n", [_Reason]),
+	    ?dbg("close: stats error=~w\n", [_Reason]),
 	    {ok, State}
     end.
 
 error(_Socket,Error,State) ->
-    ?dbg("bert_rpc_exec: error = ~p\n", [Error]),
+    ?dbg("error: ~p\n", [Error]),
     {stop, Error, State}.
 
-%%
-%% Internal
-%%
-handle_request(Socket, Request, State) ->
-    io:fwrite(user, "handle_request(Socket, ~p, State)~n", [Request]),
-    case Request of
-	{call,Module0,Function0,Arguments} when is_list(Arguments),
-						is_atom(Module0),
-						is_atom(Function0);
-						is_list(Arguments),
-						is_binary(Module0),
-						is_binary(Function0) ->
-	    Module = to_atom(Module0),
-	    Function = to_atom(Function0),
-	    ?dbg("Request = ~p~n", [{call,Module,Function,Arguments}]),
-	    case access_test(Module,Function,length(Arguments),
-			     State#state.access) of
-		{ok, {M, F, _A}, Conv} = _AccessRes ->
-		    ?dbg("access_test() -> ~p~n", [_AccessRes]),
-		    %% handle security  + stream input ! + stream output
-		    NewArgs = convert_args(Conv, Arguments),
-		    ?dbg("apply_f: ~s:~s args=~p\n", [M,F,NewArgs]),
-		    try apply_f(M, F, NewArgs) of
-			Result ->
-			    ?dbg("result: ~p\n", [Result]),
-			    B = {reply,Result},
-			    try bert:to_binary(B) of
-				Bin ->
-				    exo_socket:send(Socket, Bin),
-				    {ok,reset_state(State)}
-			    catch
-				error:Error ->
-				    Trace = erlang:get_stacktrace(),
-				    Detail = list_to_binary(io_lib:format("~p",[Error])),
-				    ?dbg("error: ~s ~p\n", [Detail,Trace]),
-				    send_server_error(Socket, 2, Detail, Trace),
-				    {ok,reset_state(State)}
-			    end
-		    catch
-			error:Error ->
-			    Trace = erlang:get_stacktrace(),
-			    Detail = list_to_binary(io_lib:format("~p",[Error])),
-			    send_server_error(Socket, 2, Detail, Trace),
-			    {ok,reset_state(State)}
-		    end;
-		{error,ServerCode,Detail} = _AccessErr ->
-		    ?dbg("access_test() -> ~p~n", [_AccessErr]),
-		    send_server_error(Socket, ServerCode, Detail, []),
-		    {ok,reset_state(State)}
-	    end;
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+start_link(Port, Options, ExoOptions) ->
+    do_start(Port, Options, ExoOptions, start_link).
 
-	{cast,Module0,Function0,Arguments} when is_list(Arguments),
-						is_atom(Module0),
-						is_atom(Function0);
-						is_list(Arguments),
-						is_binary(Module0),
-						is_binary(Function0) ->
-	    Module = to_atom(Module0),
-	    Function = to_atom(Function0),
-	    case access_test(Module,Function,length(Arguments),State) of
-		ok ->
-		    B = {noreply},
-		    exo_socket:send(Socket, bert:to_binary(B)),
-		    try apply(Module,Function,Arguments) of
-			Value ->
-			    callback(Value, State)
-		    catch
-			error:_ ->
-			    {ok,reset_state(State)}
-		    end;
-		{error,ServerCode,Detail} ->
-		    send_server_error(Socket, ServerCode, Detail, []),
-		    {ok,reset_state(State)}
-	    end;
-
-	{info, callback, Callback } ->
-	    {ok, State#state { callback = Callback }};
-
-	{info, cache, Options } ->
-	    %% cases: [{validation,Token}]
-	    {ok, State#state { cache = State#state.cache ++ Options }};
-
-	{info, stream, []} ->
-	    %% client will send call data as a stream
-	    {ok, State#state { stream = true }};
-
-	{noreply} ->
-	    {reply, noreply, State};
-
-	{reply, Reply} ->
-	    {reply, Reply, State};
-
-	{error,_} = Error ->
-	    {reply, Error, State};
-
-	close ->
-	    {stop, closed, State};
-
-	_Other ->
-	    send_server_error(Socket, ?SERV_ERR_UNDESIGNATED,
-			      <<"protocol error">>, []),
-	    {ok,State}
+do_start(Port, Options, ExoOptions, StartF) when StartF==start;
+						 StartF==start_link ->
+    case lists:keymember(ssl, 1, Options) of
+	{_, true} ->
+	    start_ssl(Port, Options, ExoOptions);
+	_ ->
+	    exo_socket_server:StartF(Port, [tcp], 
+				     [{active,once},{packet,4},binary,
+				      {reuseaddr,true} |
+				      send_timeout_opt(ExoOptions)],
+				     ?MODULE, Options)
     end.
 
-apply_f(M, F, A) ->
-    apply(M, F, A).
+start_link_ssl(Port, Options, ExoOptions) ->
+    do_start_ssl(Port, Options, ExoOptions, start_link).
+
+do_start_ssl(Port, Options, ExoOptions, StartF) when
+      StartF == start; StartF == start_link ->
+    Dir = code:priv_dir(bert),
+    exo_socket_server:StartF(Port, [tcp,probe_ssl],
+			     [{active,once},{packet,4},binary,
+			      {debug, true},
+			      {verify, verify_none}, %% no client cert required
+			      %% server demo - cert
+			      {keyfile, filename:join(Dir, "host.key")},
+			      {certfile, filename:join(Dir, "host.cert")},
+			      {reuseaddr,true} | ExoOptions], ?MODULE, Options).
+
+
+send_timeout_opt(Opts) ->
+    Opts1 = case lists:keymember(send_timeout, 1, Opts) of
+		true ->
+		    [{send_timeout, 30}|Opts];
+		false ->
+		    Opts
+	    end,
+    lists:keystore(send_timeout_close, 1, Opts1, {send_timeout_close, true}).
+
+maybe_connect(IP, Port, Protos, Opts, Timeout) ->
+    case proplists:get_value(auto_connect, Opts, true) of
+	true ->
+	    exo_socket:connect(IP, Port, Protos, Opts, Timeout);
+	false ->
+	    {error, no_connection}
+    end.
+
+handle_request(Socket, Request, State) ->
+    ?dbg("handle_request: Socket ~p, Request ~p, State ~p~n", 
+	 [Socket, Request, State]),
+    case handle_request(Request, State) of
+	{send, Result} ->
+	    exo_socket:send(Socket, Result),
+	    {ok, reset_state(State)};
+	{cast, {M, F, A}} ->
+	    %% Transformed MFA
+	    exo_socket:send(Socket, bert:to_binary({noreply})),
+	    try apply(M, F, A) of
+		Value ->
+		    callback(Value, State)
+	    catch
+		error:_ ->
+		    {ok, reset_state(State)}
+	    end;
+	{ok, NewState} ->
+	    {ok, NewState};
+	{error, {Code, Detail, Trace}} ->
+	    send_server_error(Socket, Code, Detail, Trace),
+	    {ok, reset_state(State)};
+	Other ->
+	    %% Transparant
+	    Other
+    end.
+	
+ 
+
+handle_request({C,Module,Function,Arguments}, State) 
+  when C == call; 
+       C == cast->
+    handle_call_and_cast({C,Module,Function,Arguments}, 
+			 State#state.access);
+handle_request({info, callback, Callback}, State) ->
+    {ok, State#state { callback = Callback }};
+handle_request({info, cache, Options}, State) ->
+    %% cases: [{validation,Token}]
+    {ok, State#state { cache = State#state.cache ++ Options }};
+handle_request({info, stream, []}, State) ->
+    %% client will send call data as a stream
+    {ok, State#state { stream = true }};
+handle_request({noreply}, State) ->
+    {noreply, State};
+handle_request({reply, Reply}, State) ->
+    {reply, Reply, State};
+handle_request({error,_} = Error, State) ->
+    {reply, Error, State};
+handle_request(close, State) ->
+    {stop, closed, State};
+handle_request(_Other, _State) ->
+    {error, {?SERV_ERR_UNDESIGNATED, <<"protocol error">>, []}}.
+
+handle_call_and_cast({C,Module,Function,Arguments}, Access) ->
+    ?dbg("handle_request: ~p~n", [{call,Module,Function,Arguments}]),
+    case {C, access_test({Module,Function,Arguments}, Access)} of
+	{call, {ok, {M, F, A}}} ->
+	    %% Execute first
+	    try apply1(M, F, A) of
+		{ok, Result} ->
+		    ?dbg("result: ~p\n", [Result]),
+		    {send, Result}
+	    catch
+		error:_Error ->
+		    Trace = erlang:get_stacktrace(),
+		    Detail = list_to_binary(io_lib:format("~p",[_Error])),
+		    ?dbg("handle_request: crash ~s ~p\n", [Detail,Trace]),
+		    {error, {2, Detail, Trace}}
+	    end;
+	{cast, {ok, {M, F, A}}} ->
+	    %% Reply first
+	    {cast, {M, F, A}};
+	{_C, {error,ServerCode,Detail}} ->
+	    {error, {ServerCode,Detail, []}}
+    end.
+
+
+apply1(M, F, A) ->
+    Result = apply(M, F, A),
+    ?dbg("result: ~p\n", [Result]),
+    Reply = {reply, Result},
+    Bin =  bert:to_binary(Reply),
+    {ok, Bin}.
+
 
 convert_args(keep, As) -> As;
 convert_args([H|T], Opts) when is_atom(H) ->
@@ -467,22 +517,42 @@ callback(Value, State) ->
 	    end
     end.
 
+access_test({Module0,Function0,Arguments}, Access) 
+  when is_list(Arguments), is_binary(Module0), is_binary(Function0) ->
+    Module = to_atom(Module0),
+    Function = to_atom(Function0),
+    access_test({Module,Function,Arguments}, Access);
+access_test({Module,Function,Arguments}, Access) 
+  when is_list(Arguments), is_atom(Module), is_atom(Function) ->
+    ?dbg("handle_request: ~p~n", [{call,Module,Function,Arguments}]),
+    case access_test(Module,Function,length(Arguments),Access) of
+	{ok, {M, F, _A}, Conv} = _AccessRes ->
+	    ?dbg("access_test() -> ~p~n", [_AccessRes]),
+	    %% handle security  + stream input ! + stream output
+	    NewArgs = convert_args(Conv, Arguments),
+	    ?dbg(": ~s:~s args=~p\n", [M,F,NewArgs]),
+	    {ok, {M, F, NewArgs}};
+	{error,_ServerCode,_Detail} = AccessErr ->
+	    AccessErr
+    end;
+access_test(_Other, _State) ->
+    ok.
+
+
 access_test(M,F,A, Access) ->
     access_test(M,F,A, Access, true).
 
+access_test(M,F,A, [] = Access,Check) ->
+    ?dbg("access_test(~p,~p,~p,~p,~p) - full access", [M,F,A,Access,Check]),
+    access_check(M,F,A,keep,Check);
 access_test(M,F,A, Access,Check) ->
     ?dbg("access_test(~p,~p,~p,~p,~p)~n", [M,F,A,Access,Check]),
-    if Access =:= [] ->  %% full access!!!
-	    access_check(M,F,A,keep,Check);
-       true ->
-	    case check_list(Access, M, F, A) of
-		false ->
-		    {error, ?SERV_ERR_NO_SUCH_FUNCTION,
-		     <<"access denied">>};
-		{{M1, F1, A1}, Conv} = Res ->
-		    ?dbg("check_list() -> ~p~n", [Res]),
-		    access_check(M1, F1, A1, Conv, Check)
-	    end
+    case check_list(Access, M, F, A) of
+	false ->
+	    {error, ?SERV_ERR_NO_SUCH_FUNCTION,<<"access denied">>};
+	{{M1, F1, A1}, Conv} = Res ->
+	    ?dbg("check_list() -> ~p~n", [Res]),
+	    access_check(M1, F1, A1, Conv, Check)
     end.
 
 check_list(Access=[_Check|_], M, F, A) ->
