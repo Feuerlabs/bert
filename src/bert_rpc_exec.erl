@@ -198,7 +198,7 @@ init(Socket, Options) ->
 data(Socket, Data, State) when is_binary(Data) ->
     try bert:to_term(Data) of
 	Request ->
-	    ?dbg("data: request: ~w\n", [Request]),
+	    ?dbg("data: converted request: ~w\n", [Request]),
 	    handle_request(Socket, Request, State)
     catch
 	error:_Error ->
@@ -213,7 +213,11 @@ data(Socket, Data, State) when is_binary(Data) ->
 data(Socket, Request, State) ->
     %% Already converted to bert format
     ?dbg("data: request: ~w\n", [Request]),
-    handle_request(Socket, Request, State).
+    case handle_request(Socket, Request, State) of
+	{Reply, NewState} -> {reply, Reply, NewState};
+	Other -> Other
+    end.
+	     
 
 
 %%--------------------------------------------------------------------
@@ -324,72 +328,79 @@ maybe_connect(IP, Port, Protos, Opts, Timeout) ->
     end.
 
 handle_request(Socket, Request, State) ->
-    ?dbg("handle_request: Socket ~p, Request ~p, State ~p~n", 
+    ?dbg("handle_request: Socket: ~p, Request: ~p, State: ~p~n", 
 	 [Socket, Request, State]),
-    case handle_request(Request, State) of
+    case handle_request1(Request, State) of
 	{send, Result} ->
 	    exo_socket:send(Socket, Result),
+	    ?dbg("handle_request: call result ~p sent to socket",[Result]),
 	    {ok, reset_state(State)};
 	{cast, {M, F, A}} ->
 	    %% Transformed MFA
 	    exo_socket:send(Socket, bert:to_binary({noreply})),
+	    ?dbg("handle_request: cast result noreply sent to socket",[]),
 	    try apply(M, F, A) of
 		Value ->
+		    ?dbg("handle_request: cast result ~p",[Value]),
 		    callback(Value, State)
 	    catch
-		error:_ ->
+		error:_Error ->
+		    ?dbg("handle_request: CRASH reason ~p",[_Error]),
 		    {ok, reset_state(State)}
 	    end;
 	{ok, NewState} ->
+	    ?dbg("handle_request: ok result returned",[]),
 	    {ok, NewState};
-	{error, {Code, Detail, Trace}} ->
+	{error, {Code, Detail, Trace} = _E} ->
 	    send_server_error(Socket, Code, Detail, Trace),
+	    ?dbg("handle_request: error result ~p sent to socket",[_E]),
 	    {ok, reset_state(State)};
 	Other ->
 	    %% Transparant
+	    ?dbg("handle_request: other result ~p returned",[Other]),
 	    Other
     end.
 	
  
 
-handle_request({C,Module,Function,Arguments}, State) 
+handle_request1({C,Module,Function,Arguments}, State) 
   when C == call; 
        C == cast->
     handle_call_and_cast({C,Module,Function,Arguments}, 
 			 State#state.access);
-handle_request({info, callback, Callback}, State) ->
+handle_request1({info, callback, Callback}, State) ->
     {ok, State#state { callback = Callback }};
-handle_request({info, cache, Options}, State) ->
+handle_request1({info, cache, Options}, State) ->
     %% cases: [{validation,Token}]
     {ok, State#state { cache = State#state.cache ++ Options }};
-handle_request({info, stream, []}, State) ->
+handle_request1({info, stream, []}, State) ->
     %% client will send call data as a stream
     {ok, State#state { stream = true }};
-handle_request({noreply}, State) ->
+handle_request1({noreply}, State) ->
     {noreply, State};
-handle_request({reply, Reply}, State) ->
+handle_request1({reply, Reply}, State) ->
     {reply, Reply, State};
-handle_request({error,_} = Error, State) ->
+handle_request1({error,_} = Error, State) ->
     {reply, Error, State};
-handle_request(close, State) ->
+handle_request1(close, State) ->
     {stop, closed, State};
-handle_request(_Other, _State) ->
+handle_request1(_Other, _State) ->
     {error, {?SERV_ERR_UNDESIGNATED, <<"protocol error">>, []}}.
 
 handle_call_and_cast({C,Module,Function,Arguments}, Access) ->
-    ?dbg("handle_request: ~p~n", [{call,Module,Function,Arguments}]),
+    ?dbg("handle_cc: ~p~n", [{call,Module,Function,Arguments}]),
     case {C, access_test({Module,Function,Arguments}, Access)} of
 	{call, {ok, {M, F, A}}} ->
 	    %% Execute first
 	    try apply1(M, F, A) of
 		{ok, Result} ->
-		    ?dbg("result: ~p\n", [Result]),
+		    ?dbg("handle_cc: result ~p", [Result]),
 		    {send, Result}
 	    catch
 		error:_Error ->
 		    Trace = erlang:get_stacktrace(),
 		    Detail = list_to_binary(io_lib:format("~p",[_Error])),
-		    ?dbg("handle_request: crash ~s ~p\n", [Detail,Trace]),
+		    ?dbg("handle_cc: crash ~s ~p\n", [Detail,Trace]),
 		    {error, {2, Detail, Trace}}
 	    end;
 	{cast, {ok, {M, F, A}}} ->
@@ -402,7 +413,7 @@ handle_call_and_cast({C,Module,Function,Arguments}, Access) ->
 
 apply1(M, F, A) ->
     Result = apply(M, F, A),
-    ?dbg("result: ~p\n", [Result]),
+    ?dbg("apply: result ~p\n", [Result]),
     Reply = {reply, Result},
     Bin =  bert:to_binary(Reply),
     {ok, Bin}.
@@ -503,8 +514,10 @@ encode_stacktrace([]) ->
 callback(Value, State) ->
     case State#state.callback of
 	[] ->
+	    ?dbg("callback: no callback available", []),
 	    {ok,State};
-	[{service,Service},{mfa,M,F,A}] ->
+	[{service,Service},{mfa,M,F,A} = C] ->
+	    ?dbg("callback: ~p", [C]),
 	    case string:tokens(binary_to_list(Service), ":") of
 		[Host,PortString] ->
 		    Port = list_to_integer(PortString),
