@@ -419,64 +419,6 @@ apply1(M, F, A) ->
     {ok, Bin}.
 
 
-convert_args(keep, As) -> As;
-convert_args([H|T], Opts) when is_atom(H) ->
-    case lists:keyfind(H, 1, Opts) of
-	{_, V} -> [V | convert_args(T, Opts)];
-	false  -> error({missing_argument, H})
-    end;
-convert_args([{args,Args}|T], [Opts|Opts1]) ->
-    convert_args(Args, Opts) ++ convert_args(T, Opts1);
-convert_args([{opt,K,Default}|T], Opts) ->
-    [proplists:get_value(K, Opts, Default) | convert_args(T, Opts)];
-convert_args([{TypeConv, K}|T], Opts) ->
-    case lists:keyfind(K, 1, Opts) of
-	{_, V} -> [convert_type(TypeConv, V) | convert_args(T, Opts)];
-	false  -> error({missing_argument, K})
-    end;
-convert_args([{TypeConv, K, Default}|T], Opts) ->
-    case lists:keyfind(K, 1, Opts) of
-	{_, V} -> [convert_type(TypeConv, V) | convert_args(T, Opts)];
-	false  -> [Default | convert_args(T, Opts)]
-    end;
-convert_args([], _) ->
-    [].
-
-convert_type(TypeConv, V) ->
-    case TypeConv of
-	string_to_integer -> to_integer(V);
-	string_to_float   ->
-	    case erl_scan:string(to_list(V)) of
-		{ok, [{float, _, F}], _} -> F;
-		_ -> error({bad_type, V})
-	    end;
-	string_to_atom -> to_atom(V);
-	_ -> error({bad_type_converter, TypeConv})
-    end.
-
-to_list(B) when is_binary(B) ->
-    binary_to_list(B);
-to_list(L) when is_list(L) ->
-    L.
-
-to_integer(B) when is_binary(B) ->
-    list_to_integer(binary_to_list(B));
-to_integer(L) when is_list(L) ->
-    list_to_integer(L);
-to_integer(X) ->
-    error({bad_type, X}).
-
-
-to_atom(B) when is_binary(B) ->
-    binary_to_atom(B, latin1);
-to_atom(L) when is_list(L) ->
-    list_to_atom(L);
-to_atom(A) when is_atom(A) ->
-    A;
-to_atom(X) ->
-    error({bad_type, X}).
-
-
 
 
 reset_state(State) ->
@@ -537,9 +479,9 @@ access_test({Module0,Function0,Arguments}, Access)
     access_test({Module,Function,Arguments}, Access);
 access_test({Module,Function,Arguments}, Access) 
   when is_list(Arguments), is_atom(Module), is_atom(Function) ->
-    ?dbg("handle_request: ~p~n", [{call,Module,Function,Arguments}]),
+    ?dbg("access_test: ~p~n", [{call,Module,Function,Arguments}]),
     case access_test(Module,Function,length(Arguments),Access) of
-	{ok, {M, F, _A}, Conv} = _AccessRes ->
+	{ok, {M, F, _Arity}, Conv} = _AccessRes ->
 	    ?dbg("access_test() -> ~p~n", [_AccessRes]),
 	    %% handle security  + stream input ! + stream output
 	    NewArgs = convert_args(Conv, Arguments),
@@ -552,65 +494,105 @@ access_test(_Other, _State) ->
     ok.
 
 
-access_test(M,F,A, Access) ->
-    access_test(M,F,A, Access, true).
+access_test(M,F,Arity, Access) ->
+    access_test(M,F,Arity, Access, true).
 
-access_test(M,F,A, [] = Access,Check) ->
-    ?dbg("access_test(~p,~p,~p,~p,~p) - full access", [M,F,A,Access,Check]),
-    access_check(M,F,A,keep,Check);
-access_test(M,F,A, Access,Check) ->
-    ?dbg("access_test(~p,~p,~p,~p,~p)~n", [M,F,A,Access,Check]),
-    case check_list(Access, M, F, A) of
+access_test(M,F,Arity, [] = Access,Check) ->
+    ?dbg("access_test(~p,~p,~p,~p,~p) - full access", 
+	 [M,F,Arity,Access,Check]),
+    availability_check(M,F,Arity,keep,Check);
+access_test(M,F,Arity, Access,Check) ->
+    ?dbg("access_test(~p,~p,~p,~p,~p)~n", [M,F,Arity,Access,Check]),
+    %% Iterate through access filter 
+    case check_list(Access, M, F, Arity) of
 	false ->
 	    {error, ?SERV_ERR_NO_SUCH_FUNCTION,<<"access denied">>};
-	{{M1, F1, A1}, Conv} = Res ->
+	{{M1, F1, Arity1}, Conv} = Res ->
 	    ?dbg("check_list() -> ~p~n", [Res]),
-	    access_check(M1, F1, A1, Conv, Check)
+	    availability_check(M1, F1, Arity1, Conv, Check)
     end.
 
-check_list(Access=[_Check|_], M, F, A) ->
-    ?debug("check_list: ~p [~p,~p,~p]", [_Check, M, F, A]),
-    check_list_(Access, M, F, A);
-check_list([], _M,_F,_A) ->
+check_list(Access=[_Check|_], M, F, Arity) ->
+    ?debug("check_list: ~p [~p,~p,~p]", [_Check, M, F, Arity]),
+    check_list_(Access, M, F, Arity);
+check_list([], _M,_F,_Arity) ->
     false.
 
 
-check_list_([{accept, M}|_], M, F, A) ->  {{M, F, A}, keep};
-check_list_([{accept, M, F, A}|_], M, F, A) -> {{M, F, A}, keep};
-check_list_([{reject, M}|_], M, _, _) -> false;
-check_list_([{reject, M, F, A}|_], M, F, A) -> false;
-check_list_([{propargs,M,F,Args}|_], M, F, 1) ->
-    NewA = length(Args),
-    {{M, F, NewA}, Args};
-check_list_([{verify, {Mv,Fv}}|T], M, F, A) ->
-    case Mv:Fv(M, F, A) of
-	continue -> check_list(T, M, F, A);
-	{_,_,_} = MFA1 -> {MFA1, keep};
-	{{_,_,_}, Conv} = Reply when is_list(Conv); Conv==keep -> Reply;
-	false -> false
+check_list_([{accept, M}|_], M, F, Arity) ->  
+    %% Accept all in module M
+    {{M, F, Arity}, keep}; 
+check_list_([{accept, M, F, Arity}|_], M, F, Arity) -> 
+    %% Accept function {M,F,Arity}
+    {{M, F, Arity}, keep};
+check_list_([{reject, M}|_], M, _, _) -> 
+    %% Reject all in module M
+    false;
+check_list_([{reject, M, F, Arity}|_], M, F, Arity) -> 
+    %% Reject function {M,F,Arity}
+    false;
+check_list_([{redirect, 
+	      [{{_Mx,_Fx,_ArityX},{_My,_Fy,_ArityY}}|_] = Tuplelist}|T], 
+	    M, F, Arity) ->
+    %% See if function MFArity should be redirected
+    case lists:keyfind({M,F,Arity}, 1, Tuplelist) of
+	false ->
+	    %% No redirection, continue check
+	    check_list(T, M, F, Arity);
+	{{M,F,Arity}, {M1,F1,Arity1} = _MFArity1} ->
+	    %% Redirect function MFArity to function MFArity1
+	    %% and check that instead
+	    check_list(T,M1,F1,Arity1)
     end;
-check_list_([{redirect, [_|_] = Ms}|T], M, F, A) ->
-    case lists:keyfind(M, 1, Ms) of
+check_list_([{redirect, [_Mx|_My] = ModuleList}|T], M, F, Arity) ->
+    %% See if function in module M should be redirected
+    case lists:keyfind(M, 1,ModuleList ) of
 	{M, M1} ->
-	    check_list(T, M1, F, A);
+	    %% Redirect all functions in module M to module M1
+	    %% and continue checking
+	    check_list(T, M1, F, Arity);
 	_ ->
-	    case lists:keyfind({M,F,A}, 1, Ms) of
-		false ->
-		    check_list(T, M, F, A);
-		{_, {M1,F1,A1} = _MFA1} ->
-		    check_list(T,M1,F1,A1)
-		     %% {MFA1, keep}
-	    end
+	    %% No redirection, continue check
+	    check_list(T, M, F, Arity)
     end;
-check_list_([M|_], M, F, A)             -> {{M, F, A}, keep};
-check_list_([{M,F,A} = MFA|_], M, F, A) -> {MFA, keep};
-check_list_([_|T], M, F, A)             -> check_list(T, M, F, A);
-check_list_([], _, _, _)                -> false.
+check_list_([{propargs,M,F,Args}|_], M, F, 1) ->
+    %% Convert args sent as a proplist by extracting Args from it 
+    NewArity = length(Args),
+    {{M, F, NewArity}, Args}; %% No more check, accepted!!
+check_list_([{verify, {Mv,Fv}}|T], M, F, Arity) ->
+    %% Verify by calling verification function
+    case Mv:Fv(M, F, Arity) of
+	continue -> 
+	    %% Passed verification but continue to check
+	    check_list(T, M, F, Arity);
+	{_,_,_} = MFArity1 -> 
+	    %% Converted and accepted
+	    {MFArity1, keep};
+	{{_,_,_}, Conv} = Reply when is_list(Conv); 
+				     Conv==keep -> 
+	    %% Same result as propargs (is_list) or accept (keep)
+	    Reply;
+	false -> 
+	    %% Failed verification
+	    false
+    end;
+check_list_([M|_], M, F, Arity) ->
+    %% Accept all in module M
+    {{M, F, Arity}, keep};
+check_list_([{M,F,Arity} = MFArity|_], M, F, Arity) -> 
+    %% Accept function MFArity
+    {MFArity, keep};
+check_list_([_|T], M, F, Arity) -> 
+    %% Continue check
+    check_list(T, M, F, Arity);
+check_list_([], _, _, _) -> 
+    %% Access filter empty without match :-(
+    false.
 
 
-access_check(M,F,A, Conv, false) ->
+availability_check(M,F,A, Conv, false) ->
     {ok, {M,F,A}, Conv};
-access_check(M,F,A, Conv, true) ->
+availability_check(M,F,A, Conv, true) ->
     case code:ensure_loaded(M) of
 	false ->
 	    {error, ?SERV_ERR_NO_SUCH_MODULE, <<"module not defined">>};
@@ -630,3 +612,70 @@ access_check(M,F,A, Conv, true) ->
 		    {ok, {M,F,A}, Conv}
 	    end
     end.
+
+
+convert_args(keep, As) -> As;
+convert_args([H|T], [PropList]) when is_atom(H), is_list(PropList) ->
+    %% This is the proplist case when Argument is a proplist
+    case lists:keyfind(H, 1, PropList) of
+	{_, V} -> [V | convert_args(T, PropList)];
+	false  -> error({missing_argument, H})
+    end;
+convert_args([H|T], Opts) when is_atom(H) ->
+    %% Is this a valid case ??
+    case lists:keyfind(H, 1, Opts) of
+	{_, V} -> [V | convert_args(T, Opts)];
+	false  -> error({missing_argument, H})
+    end;
+convert_args([{args,Args}|T], [Opts|Opts1]) ->
+    convert_args(Args, Opts) ++ convert_args(T, Opts1);
+convert_args([{opt,K,Default}|T], Opts) ->
+    [proplists:get_value(K, Opts, Default) | convert_args(T, Opts)];
+convert_args([{TypeConv, K}|T], Opts) ->
+    case lists:keyfind(K, 1, Opts) of
+	{_, V} -> [convert_type(TypeConv, V) | convert_args(T, Opts)];
+	false  -> error({missing_argument, K})
+    end;
+convert_args([{TypeConv, K, Default}|T], Opts) ->
+    case lists:keyfind(K, 1, Opts) of
+	{_, V} -> [convert_type(TypeConv, V) | convert_args(T, Opts)];
+	false  -> [Default | convert_args(T, Opts)]
+    end;
+convert_args([], _) ->
+    [].
+
+convert_type(TypeConv, V) ->
+    case TypeConv of
+	string_to_integer -> to_integer(V);
+	string_to_float   ->
+	    case erl_scan:string(to_list(V)) of
+		{ok, [{float, _, F}], _} -> F;
+		_ -> error({bad_type, V})
+	    end;
+	string_to_atom -> to_atom(V);
+	_ -> error({bad_type_converter, TypeConv})
+    end.
+
+to_list(B) when is_binary(B) ->
+    binary_to_list(B);
+to_list(L) when is_list(L) ->
+    L.
+
+to_integer(B) when is_binary(B) ->
+    list_to_integer(binary_to_list(B));
+to_integer(L) when is_list(L) ->
+    list_to_integer(L);
+to_integer(X) ->
+    error({bad_type, X}).
+
+
+to_atom(B) when is_binary(B) ->
+    binary_to_atom(B, latin1);
+to_atom(L) when is_list(L) ->
+    list_to_atom(L);
+to_atom(A) when is_atom(A) ->
+    A;
+to_atom(X) ->
+    error({bad_type, X}).
+
+
