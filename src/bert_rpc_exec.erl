@@ -251,7 +251,10 @@ control(_Socket, {C, _M,_F,_A} = Req, _From, #state{} = St)
   when C == call;
        C == cast ->
     ?dbg("control(~p)~n", [Req]),
-    {send, bert:to_binary(Req), St}.
+    {send, bert:to_binary(Req), St};
+control(_Socket, close = Req, _From, #state{} = St)  ->
+    ?dbg("control(~p)~n", [Req]),
+    {stop, ok, normal, St}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -557,7 +560,10 @@ check_list_([{redirect, [_Mx|_My] = ModuleList}|T], M, F, Arity) ->
     end;
 check_list_([{propargs,M,F,Args}|_], M, F, 1) ->
     %% Convert args sent as a proplist by extracting Args from it 
-    NewArity = length(Args),
+    NewArity = case Args of
+		   [{args, Args1}] -> length(Args1);
+		   _ -> length(Args)
+	       end,
     {{M, F, NewArity}, Args}; %% No more check, accepted!!
 check_list_([{verify, {Mv,Fv}}|T], M, F, Arity) ->
     %% Verify by calling verification function
@@ -590,43 +596,31 @@ check_list_([], _, _, _) ->
     false.
 
 
-availability_check(M,F,A, Conv, false) ->
-    {ok, {M,F,A}, Conv};
-availability_check(M,F,A, Conv, true) ->
+availability_check(M,F,Arity, Conv, false) ->
+    {ok, {M,F,Arity}, Conv};
+availability_check(M,F,Arity, Conv, true) ->
     case code:ensure_loaded(M) of
 	false ->
 	    {error, ?SERV_ERR_NO_SUCH_MODULE, <<"module not defined">>};
 	{error,nofile} ->
 	    {error, ?SERV_ERR_NO_SUCH_MODULE, <<"module not found">>};
 	{module,M} ->
-	    case erlang:function_exported(M,F,A) of
+	    case erlang:function_exported(M,F,Arity) of
 		false ->
-		    case erlang:is_builtin(M,F,A) of
+		    case erlang:is_builtin(M,F,Arity) of
 			true ->
-			    {ok, {M,F,A}, Conv};
+			    {ok, {M,F,Arity}, Conv};
 			false ->
 			    {error, ?SERV_ERR_NO_SUCH_FUNCTION,
 			     <<"function not defined">>}
 		    end;
 		true ->
-		    {ok, {M,F,A}, Conv}
+		    {ok, {M,F,Arity}, Conv}
 	    end
     end.
 
 
 convert_args(keep, As) -> As;
-convert_args([H|T], [PropList]) when is_atom(H), is_list(PropList) ->
-    %% This is the proplist case when Argument is a proplist
-    case lists:keyfind(H, 1, PropList) of
-	{_, V} -> [V | convert_args(T, PropList)];
-	false  -> error({missing_argument, H})
-    end;
-convert_args([H|T], Opts) when is_atom(H) ->
-    %% Is this a valid case ??
-    case lists:keyfind(H, 1, Opts) of
-	{_, V} -> [V | convert_args(T, Opts)];
-	false  -> error({missing_argument, H})
-    end;
 convert_args([{args,Args}|T], [Opts|Opts1]) ->
     convert_args(Args, Opts) ++ convert_args(T, Opts1);
 convert_args([{opt,K,Default}|T], Opts) ->
@@ -640,6 +634,12 @@ convert_args([{TypeConv, K, Default}|T], Opts) ->
     case lists:keyfind(K, 1, Opts) of
 	{_, V} -> [convert_type(TypeConv, V) | convert_args(T, Opts)];
 	false  -> [Default | convert_args(T, Opts)]
+    end;
+convert_args([H|T], Opts) when is_atom(H) ->
+    %% Is this a valid case ??
+    case lists:keyfind(H, 1, Opts) of
+	{_, V} -> [V | convert_args(T, Opts)];
+	false  -> error({missing_argument, H})
     end;
 convert_args([], _) ->
     [].
