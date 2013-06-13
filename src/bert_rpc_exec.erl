@@ -110,6 +110,9 @@ start_ssl(Port, Options, ExoOptions) ->
 -spec request(Request::term(), ReplyMethod::internal | external) ->
 		     ok  | {error, Reason::term()}.
 								       
+request({Mod, Fun, Args}, external) ->
+    %% Fix !!!! XXXXXXXXX
+    request({call, Mod, Fun, Args}, external);
 request({C, _Mod, _Fun, _Args} = Request, external) 
 when C == call;
      C == cast ->
@@ -254,7 +257,7 @@ control(_Socket, {C, _M,_F,_A} = Req, _From, #state{} = St)
     {send, bert:to_binary(Req), St};
 control(_Socket, close = Req, _From, #state{} = St)  ->
     ?dbg("control(~p)~n", [Req]),
-    {stop, ok, normal, St}.
+    {stop, normal, ok, St}.
 
 %%--------------------------------------------------------------------
 %% @doc
