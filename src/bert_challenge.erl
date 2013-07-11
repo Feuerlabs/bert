@@ -67,7 +67,7 @@ incoming(<<Tok:4/binary, Data/binary>>, St) ->
 	    Data;
 	false ->
 	    ?debug("bad incoming token~n", []),
-	    error(bad_token)
+	    erlang:error(bad_token)
     end.
 
 remote_id(#st{theirs = #data{id = ID}}) ->
@@ -246,10 +246,10 @@ recv(S) ->
 	    ok
     end,
     receive
-	{TClosed, Socket} -> error(closed);
-	{TError, Socket, Reason} -> error({TError, Reason});
+	{TClosed, Socket} -> erlang:error(closed);
+	{TError, Socket, Reason} -> erlang:error({TError, Reason});
 	{TData, Socket, Data} ->
 	    Data
     after ?TIMEOUT ->
-	    error(timeout)
+	    erlang:error(timeout)
     end.

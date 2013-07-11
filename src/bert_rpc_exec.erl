@@ -631,7 +631,7 @@ convert_args([{opt,K,Default}|T], Opts) ->
 convert_args([{TypeConv, K}|T], Opts) ->
     case lists:keyfind(K, 1, Opts) of
 	{_, V} -> [convert_type(TypeConv, V) | convert_args(T, Opts)];
-	false  -> error({missing_argument, K})
+	false  -> erlang:error({missing_argument, K})
     end;
 convert_args([{TypeConv, K, Default}|T], Opts) ->
     case lists:keyfind(K, 1, Opts) of
@@ -642,7 +642,7 @@ convert_args([H|T], Opts) when is_atom(H) ->
     %% Is this a valid case ??
     case lists:keyfind(H, 1, Opts) of
 	{_, V} -> [V | convert_args(T, Opts)];
-	false  -> error({missing_argument, H})
+	false  ->  erlang:error({missing_argument, H})
     end;
 convert_args([], _) ->
     [].
@@ -653,10 +653,10 @@ convert_type(TypeConv, V) ->
 	string_to_float   ->
 	    case erl_scan:string(to_list(V)) of
 		{ok, [{float, _, F}], _} -> F;
-		_ -> error({bad_type, V})
+		_ ->  erlang:error({bad_type, V})
 	    end;
 	string_to_atom -> to_atom(V);
-	_ -> error({bad_type_converter, TypeConv})
+	_ ->  erlang:error({bad_type_converter, TypeConv})
     end.
 
 to_list(B) when is_binary(B) ->
@@ -669,7 +669,7 @@ to_integer(B) when is_binary(B) ->
 to_integer(L) when is_list(L) ->
     list_to_integer(L);
 to_integer(X) ->
-    error({bad_type, X}).
+     erlang:error({bad_type, X}).
 
 
 to_atom(B) when is_binary(B) ->
@@ -679,6 +679,6 @@ to_atom(L) when is_list(L) ->
 to_atom(A) when is_atom(A) ->
     A;
 to_atom(X) ->
-    error({bad_type, X}).
+     erlang:error({bad_type, X}).
 
 
