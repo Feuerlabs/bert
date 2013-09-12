@@ -16,7 +16,7 @@
 
 -compile(export_all).
 
--include_lib("lager/include/log.hrl").
+-include("log.hrl").
 
 -record(data, {
 	  id,

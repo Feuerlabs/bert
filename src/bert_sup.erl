@@ -17,7 +17,7 @@
 
 %% Supervisor callbacks
 -export([init/1]).
--include_lib("lager/include/log.hrl").
+-include("log.hrl").
 
 %% Helper macro for declaring children of supervisor
 -define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).

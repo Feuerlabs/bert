@@ -18,7 +18,7 @@
 -behaviour(exo_socket_server).
 
 -include("bert.hrl").
--include_lib("lager/include/log.hrl").
+-include("log.hrl").
 
 -define(SERVER, ?MODULE).
 

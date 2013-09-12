@@ -25,7 +25,7 @@
 -export([open/0, open/1, open/2, open/4]).
 -export([disconnect/3, close/1, read_chunk/1]).
 
--include_lib("lager/include/log.hrl").
+-include("log.hrl").
 
 -type call_result() :: 
 	{reply,Result::term(),CacheInfo::cache_info()} |
