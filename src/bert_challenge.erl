@@ -200,7 +200,7 @@ keys(ID, #st{theirs = #data{key = {M, F}}}) ->
     end;
 keys(_, #st{theirs = #data{key = Kt}, mine = #data{key = Km}}) when
       is_binary(Kt), is_binary(Km) ->
-    ?debug("~p: keys their ~p, mine ~p~n", [Kt, Km]),
+    ?debug("Keys their ~p, mine ~p~n", [Kt, Km]),
     {Km, Kt}.
 
 
