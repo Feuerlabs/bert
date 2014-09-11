@@ -336,6 +336,12 @@ maybe_connect(IP, Port, Protos, Opts, Timeout) ->
 handle_request(Socket, Request, State) ->
     ?dbg("handle_request: Socket: ~p, Request: ~p, State: ~p~n", 
 	 [Socket, Request, State]),
+
+    %% Update process dict so that call receiver knows who the 
+    %% call is from.
+    {ok,{IP,Port}} = exo_socket:peername(Socket),
+    put(?BERT_PEER_DICT_KEY, {IP, Port}),
+   
     case handle_request1(Request, State) of
 	{send, Result} ->
 	    exo_socket:send(Socket, Result),

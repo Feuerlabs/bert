@@ -10,7 +10,8 @@
 -ifndef(_BERT_HRL_).
 -define(_BERT_HRL_, true).
 
--define(BERT_PORT, 9999).
+-define(BERT_PORT,                      9999).
+-define(BERT_PEER_DICT_KEY,             bert_exec_rpc_caller_peername).
 
 -define(PROT_ERR_UNDESIGNATED,          0).
 -define(PROT_ERR_UNABLE_TO_READ_HEADER, 1).
