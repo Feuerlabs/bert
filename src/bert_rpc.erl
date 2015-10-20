@@ -62,12 +62,13 @@ call_host(Mod, Fun, Args) ->
 call_host(Host, Mod, Fun, Args) ->
     call_host(Host, ?BERT_PORT, [tcp], Mod, Fun, Args).
 
--spec call_host(Host::string(), Port::integer(1..65535),
+-spec call_host(Host::string(), Port::1..655353,
 		Protos::[protocol()],
 		Mod::atom(), Fun::atom(), Args::[term()]) ->
 		       call_result().    
 call_host(Host, Port, Protos, Mod, Fun, Args)
-  when is_atom(Mod), is_atom(Fun), is_list(Args) ->
+  when is_integer(Port), Port >= 1, Port =< 65535,
+       is_atom(Mod), is_atom(Fun), is_list(Args) ->
     case open(Host, Port, Protos, ?CONNECT_TIMEOUT) of
 	{ok, Socket} ->
 	    case call(Socket, Mod, Fun, Args) of
@@ -97,7 +98,7 @@ cast_host(Mod, Fun, Args) ->
 cast_host(Host, Mod, Fun, Args) ->
     cast_host(Host, ?BERT_PORT, [tcp], Mod, Fun, Args).
 
--spec cast_host(Host::string(), Port::integer(1..65535),
+-spec cast_host(Host::string(), Port::integer(),
 		Protos::[protocol()],
 		Mod::atom(), Fun::atom(), Args::[term()]) ->
 		       cast_result().    
@@ -130,7 +131,7 @@ callback_host(Mod, Fun, Args, Service, MFA) ->
 callback_host(Host, Mod, Fun, Args, Service, MFA) ->
     callback_host(Host, ?BERT_PORT, [tcp], Mod, Fun, Args, Service, MFA).
 
--spec callback_host(Host::string(), Port::integer(1..65535),
+-spec callback_host(Host::string(), Port::1..65535,
 		    Protos::[protocol()],
 		    Mod::atom(), Fun::atom(), Args::[term()],
 		    Service::binary(), 
@@ -138,6 +139,7 @@ callback_host(Host, Mod, Fun, Args, Service, MFA) ->
 			   cast_result().
 
 callback_host(Host, Port, Protos, Mod, Fun, Args, Service, MFA={M,F,A}) when
+      is_integer(Port), Port >= 1, Port =< 65535,
       is_list(Protos),
       is_atom(Mod), is_atom(Fun), is_list(Args),
       is_binary(Service),
